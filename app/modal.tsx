@@ -1,3 +1,4 @@
+/** Example modal route from Expo starter — optional demo screen. */
 import { Link } from 'expo-router';
 import { StyleSheet } from 'react-native';
 

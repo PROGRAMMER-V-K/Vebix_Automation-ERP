@@ -1,0 +1,10 @@
+// Example Firestore security rules — tighten before production (require auth.uid).
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Development-only rules. Tighten before production (require auth).
+    match /users/{userId}/attendance/{date} {
+      allow read, write: if true;
+    }
+  }
+}

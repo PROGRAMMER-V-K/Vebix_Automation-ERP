@@ -1,50 +1,110 @@
-# Welcome to your Expo app 👋
+# Vebix Automation ERP
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Cross-platform **Enterprise Resource Planning** app built with **Expo** and **React Native**. Manage inventory, sales, finance, HR, and employee attendance from web and mobile.
 
-## Get started
+## Features
 
-1. Install dependencies
+- **Dashboard** — department workspaces with sidebar (desktop) and mobile navigation
+- **Authentication** — email/password and Google Sign-In with persistent sessions
+- **Attendance** — clock in/out, daily hours, weekly stats, history in **Firebase Firestore**
+- **Responsive UI** — split login on desktop; compact layout on phone
 
-   ```bash
-   npm install
-   ```
+## Tech stack
 
-2. Start the app
+| Layer | Technology |
+|--------|------------|
+| Framework | Expo SDK 54, Expo Router |
+| Language | TypeScript |
+| UI | React Native |
+| Backend | Firebase Auth, Cloud Firestore |
+| Storage | AsyncStorage (auth persistence on mobile) |
 
-   ```bash
-   npx expo start
-   ```
+## Project structure
 
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```
+app/
+  (auth)/          # Login / sign-up screens
+  (dashboard)/     # ERP home + department routes
+  _layout.tsx      # Root layout, auth provider, navigation guard
+components/
+  auth/            # Login UI, route protection
+  horizon/         # Sidebar, dashboard shell, department cards
+  attendance/      # Attendance UI
+constants/         # Brand colors, navigation items, theme tokens
+contexts/          # Auth state (Firebase)
+hooks/             # Attendance, Google sign-in, sign-out
+lib/               # Firebase, Firestore attendance, auth helpers
+types/             # Shared TypeScript types
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## Getting started
 
-## Learn more
+### 1. Install dependencies
 
-To learn more about developing your project with Expo, look at the following resources:
+```bash
+npm install
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+### 2. Environment variables
 
-## Join the community
+Copy the example file and fill in your Firebase / Google credentials:
 
-Join our community of developers creating universal apps.
+```bash
+copy .env.example .env
+```
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Required variables (see `.env.example`):
+
+- `EXPO_PUBLIC_FIREBASE_*` — from Firebase Console → Project settings → Web app
+- `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` — from Firebase → Authentication → Google → Web client ID
+
+### 3. Firebase setup
+
+1. Create a project at [Firebase Console](https://console.firebase.google.com/)
+2. Enable **Firestore Database**
+3. Enable **Authentication** → Email/Password and **Google**
+4. Deploy rules from `firestore.rules.example` (adjust for production)
+
+Firestore path for attendance:
+
+```
+users/{userId}/attendance/{date}
+```
+
+### 4. Google Sign-In (mobile / Expo Go)
+
+Add authorized redirect URIs in [Google Cloud Console](https://console.cloud.google.com/) → Credentials → Web client:
+
+- `https://auth.expo.io/@YOUR_EXPO_USERNAME/erp` (Expo Go)
+- `erp://oauth` (standalone builds)
+
+The login screen shows the exact Expo Go redirect URI when applicable.
+
+### 5. Run the app
+
+```bash
+npx expo start
+```
+
+Clear cache after config changes:
+
+```bash
+npx expo start -c
+```
+
+- **Web:** press `w` or open `http://localhost:8081`
+- **Android/iOS:** scan QR with Expo Go
+
+## Scripts
+
+| Command | Description |
+|---------|-------------|
+| `npm start` | Start Expo dev server |
+| `npm run web` | Start for web |
+| `npm run android` | Start for Android |
+| `npm run ios` | Start for iOS |
+| `npm run lint` | Run ESLint |
+
+## License
+
+Private — Vebix Automation.

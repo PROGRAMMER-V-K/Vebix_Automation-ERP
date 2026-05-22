@@ -1,9 +1,9 @@
 {
   "expo": {
-    "name": "erp",
+    "name": "Vebix Automation",
     "slug": "erp",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "erp",
     "userInterfaceStyle": "automatic",
@@ -43,6 +43,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "0209d17d-206c-4c4f-a85f-1e285dba9106"
+      }
+    },
+    "owner": "vedang_kulkarni"
   }
 }
