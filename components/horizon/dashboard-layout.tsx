@@ -69,7 +69,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 48,
     paddingVertical: 40,
-    maxWidth: 720,
+    maxWidth: 1280,
   },
   contentMobile: {
     paddingHorizontal: 20,
