@@ -95,6 +95,17 @@ export function GoogleSheetImportModal({
     };
   } | null>(null);
 
+  const [parsedItems, setParsedItems] = useState<{
+    items: (NewInventoryItem & { statusVal: string; isTextFormatted: boolean })[];
+    statusColName: string;
+    uniqueStatuses: { status: string; count: number }[];
+    hasTextFormatted: boolean;
+    textFormattedCount: number;
+    textFormattedSum: number;
+  } | null>(null);
+  const [selectedStatuses, setSelectedStatuses] = useState<Record<string, boolean>>({});
+  const [excludeTextFormatted, setExcludeTextFormatted] = useState(true);
+
   // Extract Spreadsheet ID from Google Sheets URL
   function getSpreadsheetId(url: string): string | null {
     const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
@@ -104,6 +115,7 @@ export function GoogleSheetImportModal({
   async function handleImport() {
     setError(null);
     setSuccessResult(null);
+    setParsedItems(null);
 
     const spreadsheetId = getSpreadsheetId(sheetUrl.trim());
     if (!spreadsheetId) {
@@ -141,6 +153,16 @@ export function GoogleSheetImportModal({
       const categoryIdx = headers.findIndex((h) => h.includes('category') || h.includes('type') || h.includes('cat'));
       const qtyIdx = headers.findIndex((h) => h.includes('qty') || h.includes('quantity') || h.includes('stock') || h.includes('count'));
       const codeIdx = headers.findIndex((h) => h.includes('code') || h.includes('sku') || h.includes('id'));
+      const statusIdx = headers.findIndex(
+        (h) =>
+          h.includes('status') ||
+          h.includes('active') ||
+          h.includes('state') ||
+          h.includes('remark') ||
+          h.includes('approve') ||
+          h.includes('payment')
+      );
+      
       let dateIdx = headers.findIndex(
         (h) =>
           h.includes('date') ||
@@ -198,6 +220,7 @@ export function GoogleSheetImportModal({
         qtyIdx,
         codeIdx,
         dateIdx,
+        statusIdx,
       });
 
       if (nameIdx === -1 || invoiceIdx === -1 || projectIdx === -1 || priceIdx === -1) {
@@ -214,8 +237,13 @@ export function GoogleSheetImportModal({
         )
       );
 
-      const itemsToImport: NewInventoryItem[] = [];
+      const tempItems: (NewInventoryItem & { statusVal: string; isTextFormatted: boolean })[] = [];
       const seenInSheet = new Set<string>();
+      const statusCounts: Record<string, number> = {};
+      let textFormattedCount = 0;
+      let textFormattedSum = 0;
+      const indianGroupingRegex = /,\d{2},/;
+
       let skippedCount = 0;
       let missingNameCount = 0;
       let duplicateCount = 0;
@@ -231,8 +259,12 @@ export function GoogleSheetImportModal({
         const name = row[nameIdx] ? row[nameIdx].trim() : '';
         const invoiceNo = row[invoiceIdx] ? row[invoiceIdx].trim() : '';
         const project = row[projectIdx] ? row[projectIdx].trim() : '';
-        const rawPrice = row[priceIdx] ? row[priceIdx].replace(/[$,\s]/g, '') : '';
-        const price = parseFloat(rawPrice);
+        const rawPrice = row[priceIdx] ? row[priceIdx].trim() : '';
+        
+        // Detect text-formatted cell by raw string from CSV (invalid grouping in US locale)
+        const isTextFormatted = indianGroupingRegex.test(rawPrice);
+        const cleanPrice = rawPrice.replace(/[$,\s]/g, '');
+        const price = parseFloat(cleanPrice);
 
         // Required field validation (only skip if name is blank)
         if (!name) {
@@ -264,7 +296,10 @@ export function GoogleSheetImportModal({
         const dateVal = dateIdx !== -1 && row[dateIdx] ? row[dateIdx].trim() : '';
         const date = normalizeDate(dateVal);
 
-        itemsToImport.push({
+        const rawStatus = statusIdx !== -1 && row[statusIdx] ? row[statusIdx].trim() : '';
+        const statusVal = rawStatus || '(Empty)';
+
+        tempItems.push({
           name,
           invoiceNo: finalInvoiceNo,
           project: finalProject,
@@ -273,9 +308,58 @@ export function GoogleSheetImportModal({
           quantity,
           code,
           date,
+          statusVal,
+          isTextFormatted,
         });
+
+        if (statusIdx !== -1) {
+          statusCounts[statusVal] = (statusCounts[statusVal] || 0) + 1;
+        }
+
+        if (isTextFormatted) {
+          textFormattedCount++;
+          textFormattedSum += finalPrice;
+        }
       }
 
+      const hasStatus = statusIdx !== -1 && Object.keys(statusCounts).length > 0;
+      const hasTextFormatted = textFormattedCount > 0;
+
+      // If status column is found or text-formatted items are detected, open configuration screen
+      if (hasStatus || hasTextFormatted) {
+        let uniqueStatuses: { status: string; count: number }[] = [];
+        const initialSelections: Record<string, boolean> = {};
+
+        if (hasStatus) {
+          uniqueStatuses = Object.keys(statusCounts).map((status) => ({
+            status,
+            count: statusCounts[status],
+          })).sort((a, b) => b.count - a.count);
+
+          const inactiveWords = ['cancel', 'draft', 'inactive', 'pending', 'hold', 'returned', 'no', 'fail'];
+          uniqueStatuses.forEach(({ status }) => {
+            const lowerStatus = status.toLowerCase();
+            const isInactive = inactiveWords.some((word) => lowerStatus.includes(word));
+            initialSelections[status] = !isInactive;
+          });
+        }
+
+        setParsedItems({
+          items: tempItems,
+          statusColName: statusIdx !== -1 ? parsedRows[0][statusIdx].trim() : '',
+          uniqueStatuses,
+          hasTextFormatted,
+          textFormattedCount,
+          textFormattedSum,
+        });
+        setSelectedStatuses(initialSelections);
+        setExcludeTextFormatted(true);
+        setImporting(false);
+        return;
+      }
+
+      // Fallback: Proceed with normal import immediately
+      const itemsToImport = tempItems.map(({ statusVal, isTextFormatted, ...rest }) => rest);
       if (itemsToImport.length === 0) {
         setSuccessResult({
           imported: 0,
@@ -313,10 +397,57 @@ export function GoogleSheetImportModal({
     }
   }
 
+  async function confirmStatusImport() {
+    if (!parsedItems) return;
+    setImporting(true);
+    setError(null);
+    try {
+      const filtered = parsedItems.items.filter((item) => {
+        // Exclude if text-formatted and exclude checkbox is checked
+        if (parsedItems.hasTextFormatted && excludeTextFormatted && item.isTextFormatted) {
+          return false;
+        }
+        // Filter by status if status column exists
+        if (parsedItems.statusColName && !selectedStatuses[item.statusVal]) {
+          return false;
+        }
+        return true;
+      });
+
+      const itemsToImport = filtered.map(({ statusVal, isTextFormatted, ...rest }) => rest);
+      const skippedCount = parsedItems.items.length - filtered.length;
+
+      if (itemsToImport.length === 0) {
+        setError('No items selected for import. Please ensure at least one item remains selected.');
+        setImporting(false);
+        return;
+      }
+
+      const result = await onImport(itemsToImport);
+      if (result.ok) {
+        setSuccessResult({
+          imported: itemsToImport.length,
+          skipped: skippedCount,
+          reasons: { missingName: 0, duplicate: 0 },
+        });
+        setParsedItems(null);
+        setSheetUrl('');
+      } else {
+        setError(result.message || 'Error occurred during database insertion.');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred while importing.');
+    } finally {
+      setImporting(false);
+    }
+  }
+
   function handleClose() {
     setError(null);
     setSuccessResult(null);
     setSheetUrl('');
+    setParsedItems(null);
+    setSelectedStatuses({});
     onClose();
   }
 
@@ -341,25 +472,132 @@ export function GoogleSheetImportModal({
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.scrollContent}>
             
-            <Text style={styles.instructions}>
-              Sync spreadsheet records directly into your Firestore ERP database with automatic deduplication.
-            </Text>
+            {parsedItems ? (
+              // Configuration Screen
+              <View style={styles.configContainer}>
+                <Text style={styles.configTitle}>Import Configuration</Text>
+                
+                {/* Text Formatted Items Filter Box */}
+                {parsedItems.hasTextFormatted && (
+                  <View style={styles.textFormattedBox}>
+                    <Pressable
+                      style={styles.textFormattedHeader}
+                      onPress={() => setExcludeTextFormatted(!excludeTextFormatted)}>
+                      <View style={[styles.checkbox, excludeTextFormatted && styles.checkboxChecked]}>
+                        {excludeTextFormatted && <MaterialIcons name="check" size={12} color={HorizonColors.white} />}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.textFormattedTitle}>
+                          Exclude text-formatted cells (Recommended)
+                        </Text>
+                        <Text style={styles.textFormattedSubtitle}>
+                          Detected {parsedItems.textFormattedCount} items (totaling ₹{parsedItems.textFormattedSum.toLocaleString()}) formatted as text in your sheet. Google Sheets SUM ignores these items.
+                        </Text>
+                      </View>
+                    </Pressable>
+                    
+                    {/* Collapsible list of text-formatted items */}
+                    <ScrollView style={styles.textItemsList} nestedScrollEnabled>
+                      {parsedItems.items.filter(item => item.isTextFormatted).map((item, idx) => (
+                        <Text key={idx} style={styles.textItemRow}>
+                          • {item.name} (₹{item.price.toLocaleString()})
+                        </Text>
+                      ))}
+                    </ScrollView>
+                  </View>
+                )}
 
-            {/* Steps / Prerequisites */}
-            <View style={styles.infoBox}>
-              <View style={styles.infoRow}>
-                <MaterialIcons name="share" size={16} color={HorizonColors.primary} />
-                <Text style={styles.infoText}>
-                  Set sharing to <Text style={{ fontWeight: '700' }}>&quot;Anyone with the link can view&quot;</Text>
-                </Text>
+                {/* Status Column Filter List */}
+                {parsedItems.statusColName ? (
+                  <>
+                    <Text style={styles.configSubtitle}>
+                      We detected a status column <Text style={{ fontWeight: '700' }}>&quot;{parsedItems.statusColName}&quot;</Text>. Choose which statuses to import:
+                    </Text>
+
+                    <View style={styles.statusList}>
+                      {parsedItems.uniqueStatuses.map(({ status, count }) => {
+                        const isChecked = !!selectedStatuses[status];
+                        return (
+                          <Pressable
+                            key={status}
+                            style={styles.statusRow}
+                            onPress={() => {
+                              setSelectedStatuses(prev => ({
+                                ...prev,
+                                [status]: !prev[status]
+                              }));
+                            }}>
+                            <View style={[styles.checkbox, isChecked && styles.checkboxChecked]}>
+                              {isChecked && <MaterialIcons name="check" size={12} color={HorizonColors.white} />}
+                            </View>
+                            <Text style={styles.statusText}>{status}</Text>
+                            <Text style={styles.statusCount}>{count} items</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </>
+                ) : null}
+
+                {/* Live Preview Summary */}
+                <View style={styles.previewSummaryBox}>
+                  <MaterialIcons name="info-outline" size={16} color={HorizonColors.primary} />
+                  <Text style={styles.previewSummaryText}>
+                    Selected to import:{' '}
+                    <Text style={{ fontWeight: '700' }}>
+                      {parsedItems.items.filter((item) => {
+                        if (parsedItems.hasTextFormatted && excludeTextFormatted && item.isTextFormatted) return false;
+                        if (parsedItems.statusColName && !selectedStatuses[item.statusVal]) return false;
+                        return true;
+                      }).length}
+                    </Text>{' '}
+                    items. Will skip:{' '}
+                    <Text style={{ fontWeight: '700' }}>
+                      {parsedItems.items.filter((item) => {
+                        if (parsedItems.hasTextFormatted && excludeTextFormatted && item.isTextFormatted) return true;
+                        if (parsedItems.statusColName && !selectedStatuses[item.statusVal]) return true;
+                        return false;
+                      }).length}
+                    </Text>{' '}
+                    items.
+                  </Text>
+                </View>
+
+                {/* Back button */}
+                <Pressable
+                  style={styles.backBtn}
+                  onPress={() => {
+                    setParsedItems(null);
+                    setError(null);
+                  }}>
+                  <MaterialIcons name="arrow-back" size={14} color={HorizonColors.primary} />
+                  <Text style={styles.backBtnText}>Change sheet link</Text>
+                </Pressable>
               </View>
-              <View style={styles.infoRow}>
-                <MaterialIcons name="view-column" size={16} color={HorizonColors.primary} />
-                <Text style={styles.infoText}>
-                  Required column headers: <Text style={{ fontWeight: '600' }}>Product Name</Text>, <Text style={{ fontWeight: '600' }}>Invoice No</Text>, <Text style={{ fontWeight: '600' }}>Project</Text>, <Text style={{ fontWeight: '600' }}>Price</Text>.
+            ) : (
+              // Original URL input screen
+              <>
+                <Text style={styles.instructions}>
+                  Sync spreadsheet records directly into your Firestore ERP database with automatic deduplication.
                 </Text>
-              </View>
-            </View>
+
+                {/* Steps / Prerequisites */}
+                <View style={styles.infoBox}>
+                  <View style={styles.infoRow}>
+                    <MaterialIcons name="share" size={16} color={HorizonColors.primary} />
+                    <Text style={styles.infoText}>
+                      Set sharing to <Text style={{ fontWeight: '700' }}>&quot;Anyone with the link can view&quot;</Text>
+                    </Text>
+                  </View>
+                  <View style={styles.infoRow}>
+                    <MaterialIcons name="view-column" size={16} color={HorizonColors.primary} />
+                    <Text style={styles.infoText}>
+                      Required column headers: <Text style={{ fontWeight: '600' }}>Product Name</Text>, <Text style={{ fontWeight: '600' }}>Invoice No</Text>, <Text style={{ fontWeight: '600' }}>Project</Text>, <Text style={{ fontWeight: '600' }}>Price</Text>.
+                    </Text>
+                  </View>
+                </View>
+              </>
+            )}
 
             {/* Error Message */}
             {error ? (
@@ -391,6 +629,11 @@ export function GoogleSheetImportModal({
                           • {successResult.reasons.missingName} rows missing a Product Name
                         </Text>
                       ) : null}
+                      {!parsedItems && successResult.reasons.duplicate === 0 && successResult.reasons.missingName === 0 ? (
+                        <Text style={styles.skippedReasonItem}>
+                          • {successResult.skipped} items skipped due to filter settings
+                        </Text>
+                      ) : null}
                     </View>
                   ) : null}
                 </View>
@@ -398,23 +641,25 @@ export function GoogleSheetImportModal({
             ) : null}
 
             {/* URL Input */}
-            <View style={styles.field}>
-              <Text style={styles.label}>Paste Google Sheet URL</Text>
-              <TextInput
-                style={[styles.input, error && styles.inputError]}
-                placeholder="https://docs.google.com/spreadsheets/d/.../edit?usp=sharing"
-                placeholderTextColor={HorizonColors.textMuted}
-                value={sheetUrl}
-                onChangeText={(val) => {
-                  setSheetUrl(val);
-                  if (error) setError(null);
-                  if (successResult) setSuccessResult(null);
-                }}
-                editable={!importing}
-                autoCapitalize="none"
-                autoComplete="off"
-              />
-            </View>
+            {!parsedItems && !successResult && (
+              <View style={styles.field}>
+                <Text style={styles.label}>Paste Google Sheet URL</Text>
+                <TextInput
+                  style={[styles.input, error && styles.inputError]}
+                  placeholder="https://docs.google.com/spreadsheets/d/.../edit?usp=sharing"
+                  placeholderTextColor={HorizonColors.textMuted}
+                  value={sheetUrl}
+                  onChangeText={(val) => {
+                    setSheetUrl(val);
+                    if (error) setError(null);
+                    if (successResult) setSuccessResult(null);
+                  }}
+                  editable={!importing}
+                  autoCapitalize="none"
+                  autoComplete="off"
+                />
+              </View>
+            )}
 
           </ScrollView>
 
@@ -427,7 +672,26 @@ export function GoogleSheetImportModal({
               <Text style={styles.cancelBtnText}>Close</Text>
             </Pressable>
             
-            {successResult ? null : (
+            {successResult ? null : parsedItems ? (
+              <Pressable
+                onPress={confirmStatusImport}
+                disabled={importing}
+                style={({ pressed }) => [
+                  styles.btn,
+                  styles.importBtn,
+                  importing && styles.btnDisabled,
+                  pressed && styles.btnPressed,
+                ]}>
+                {importing ? (
+                  <ActivityIndicator size="small" color={HorizonColors.white} />
+                ) : (
+                  <>
+                    <MaterialIcons name="cloud-done" size={18} color={HorizonColors.white} />
+                    <Text style={styles.importBtnText}>Confirm Import</Text>
+                  </>
+                )}
+              </Pressable>
+            ) : (
               <Pressable
                 onPress={handleImport}
                 disabled={importing || !sheetUrl.trim()}
@@ -633,5 +897,125 @@ const styles = StyleSheet.create({
   },
   btnDisabled: {
     opacity: 0.5,
+  },
+  configContainer: {
+    gap: 12,
+  },
+  configTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: HorizonColors.text,
+  },
+  configSubtitle: {
+    fontSize: 14,
+    color: HorizonColors.textMuted,
+    lineHeight: 20,
+  },
+  statusList: {
+    borderWidth: 1,
+    borderColor: HorizonColors.border,
+    borderRadius: 10,
+    backgroundColor: '#FAFBFD',
+    padding: 8,
+    gap: 6,
+    maxHeight: 180,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    gap: 10,
+  },
+  checkbox: {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: HorizonColors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: HorizonColors.white,
+  },
+  checkboxChecked: {
+    backgroundColor: HorizonColors.primary,
+    borderColor: HorizonColors.primary,
+  },
+  statusText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: HorizonColors.text,
+    flex: 1,
+  },
+  statusCount: {
+    fontSize: 13,
+    color: HorizonColors.textMuted,
+  },
+  previewSummaryBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: HorizonColors.primaryLight,
+    borderWidth: 1,
+    borderColor: HorizonColors.cardBorder,
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 4,
+  },
+  previewSummaryText: {
+    fontSize: 13,
+    color: HorizonColors.text,
+    lineHeight: 18,
+    flex: 1,
+  },
+  backBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    marginTop: 4,
+  },
+  backBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: HorizonColors.primary,
+  },
+  textFormattedBox: {
+    borderWidth: 1,
+    borderColor: '#FEE2E2',
+    borderRadius: 10,
+    backgroundColor: '#FEF2F2',
+    padding: 12,
+    gap: 8,
+    marginTop: 4,
+  },
+  textFormattedHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  textFormattedTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#991B1B',
+  },
+  textFormattedSubtitle: {
+    fontSize: 12,
+    color: '#B91C1C',
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  textItemsList: {
+    maxHeight: 100,
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    borderRadius: 6,
+    padding: 8,
+    marginTop: 4,
+  },
+  textItemRow: {
+    fontSize: 11,
+    color: '#7F1D1D',
+    lineHeight: 16,
   },
 });

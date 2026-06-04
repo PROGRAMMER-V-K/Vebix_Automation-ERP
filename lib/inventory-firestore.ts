@@ -142,6 +142,23 @@ export async function deleteInventoryItem(id: string): Promise<void> {
   await deleteDoc(inventoryDoc(id));
 }
 
+export async function clearAllInventoryItems(ids: string[]): Promise<void> {
+  const db = getFirestoreDb();
+  const chunks = [];
+  
+  for (let i = 0; i < ids.length; i += 450) {
+    chunks.push(ids.slice(i, i + 450));
+  }
+
+  for (const chunk of chunks) {
+    const batch = writeBatch(db);
+    for (const id of chunk) {
+      batch.delete(doc(db, 'inventory', id));
+    }
+    await batch.commit();
+  }
+}
+
 export async function importInventoryItems(
   items: NewInventoryItem[],
   updatedBy: string,

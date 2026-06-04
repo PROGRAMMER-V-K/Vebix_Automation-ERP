@@ -9,7 +9,7 @@
  * - Harmonious HSL colors, premium typography, and subtle micro-animations/states.
  */
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Alert,
   Pressable,
@@ -28,14 +28,16 @@ type InventoryTableCardProps = {
   items: InventoryItem[];
   onEdit: (item: InventoryItem) => void;
   onDelete: (id: string) => void;
+  onFilteredItemsChange?: (items: InventoryItem[]) => void;
 };
 
-const CATEGORIES = ['All', 'Device', 'Electronic', 'Cooking', 'General'];
+const CATEGORIES = ['All', 'Device', 'Electronic',  'General'];
 
 export function InventoryTableCard({
   items,
   onEdit,
   onDelete,
+  onFilteredItemsChange,
 }: InventoryTableCardProps) {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 768;
@@ -122,6 +124,10 @@ export function InventoryTableCard({
       return true;
     });
   }, [items, searchQuery, filterName, filterCategory, filterCode, filterDate]);
+
+  useEffect(() => {
+    onFilteredItemsChange?.(filteredItems);
+  }, [filteredItems, onFilteredItemsChange]);
 
   function handleDeletePress(item: InventoryItem) {
     Alert.alert(

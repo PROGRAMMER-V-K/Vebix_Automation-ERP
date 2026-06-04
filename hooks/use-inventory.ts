@@ -9,6 +9,7 @@ import {
   subscribeToInventory,
   updateInventoryItem,
   importInventoryItems,
+  clearAllInventoryItems,
 } from '@/lib/inventory-firestore';
 import { useAuthUser } from '@/contexts/auth-context';
 import { isFirebaseConfigured } from '@/lib/firebase';
@@ -108,6 +109,19 @@ export function useInventory() {
     }
   }, [userName]);
 
+  const clearAll = useCallback(async () => {
+    try {
+      const ids = inventoryItems.map((item) => item.id);
+      await clearAllInventoryItems(ids);
+      return { ok: true as const };
+    } catch (err) {
+      return {
+        ok: false as const,
+        message: err instanceof Error ? err.message : 'Failed to clear inventory items.',
+      };
+    }
+  }, [inventoryItems]);
+
   return {
     inventoryItems,
     loading,
@@ -116,6 +130,7 @@ export function useInventory() {
     updateItem,
     deleteItem,
     importItems,
+    clearAll,
     isConfigured: isFirebaseConfigured(),
   };
 }

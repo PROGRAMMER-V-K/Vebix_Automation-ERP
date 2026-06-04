@@ -18,7 +18,7 @@ import {
 import { HorizonColors } from '@/constants/horizon';
 import { InventoryItem, NewInventoryItem } from '@/types/inventory';
 
-const CATEGORIES = ['Device', 'Electronic', 'Cooking', 'General'];
+const CATEGORIES = ['Device', 'Electronic', 'General'];
 
 type AddProductModalProps = {
   visible: boolean;

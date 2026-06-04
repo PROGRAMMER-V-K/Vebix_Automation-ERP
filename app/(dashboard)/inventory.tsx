@@ -16,16 +16,43 @@ import {
 
 import { AddProductModal } from '@/components/inventory/add-product-modal';
 import { GoogleSheetImportModal } from '@/components/inventory/google-sheet-import-modal';
+import { InventoryAnalytics } from '@/components/inventory/inventory-analytics';
 import { InventoryTableCard } from '@/components/inventory/inventory-table-card';
 import { HorizonColors } from '@/constants/horizon';
 import { useInventory } from '@/hooks/use-inventory';
 import { InventoryItem, NewInventoryItem } from '@/types/inventory';
 
 export default function InventoryScreen() {
-  const { inventoryItems, loading, error, addItem, updateItem, deleteItem, importItems, isConfigured } = useInventory();
+  const { inventoryItems, loading, error, addItem, updateItem, deleteItem, importItems, clearAll, isConfigured } = useInventory();
   const [modalVisible, setModalVisible] = useState(false);
   const [sheetModalVisible, setSheetModalVisible] = useState(false);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
+  const [showAnalytics, setShowAnalytics] = useState(true);
+  const [filteredItems, setFilteredItems] = useState<InventoryItem[]>([]);
+
+  async function handleClearAll() {
+    Alert.alert(
+      'Clear Database',
+      'Are you sure you want to delete ALL inventory products from the database? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete All',
+          style: 'destructive',
+          onPress: async () => {
+            const res = await clearAll();
+            if (res.ok) {
+              Alert.alert('Success', 'Inventory database cleared successfully.');
+            } else {
+              Alert.alert('Error', res.message || 'Failed to clear inventory.');
+            }
+          },
+        },
+      ],
+    );
+  }
+
+
 
   async function handleSaveProduct(itemData: NewInventoryItem | Partial<InventoryItem>) {
     if (editingItem) {
@@ -106,6 +133,24 @@ export default function InventoryScreen() {
         </View>
 
         <View style={styles.actionHeaderRow}>
+          {/* Toggle Analytics Button */}
+          <Pressable
+            style={({ pressed }) => [
+              styles.analyticsToggleBtn,
+              showAnalytics && styles.analyticsToggleBtnActive,
+              pressed && styles.btnPressed,
+            ]}
+            onPress={() => setShowAnalytics(!showAnalytics)}>
+            <MaterialIcons
+              name="bar-chart"
+              size={18}
+              color={showAnalytics ? HorizonColors.primary : HorizonColors.text}
+            />
+            <Text style={[styles.analyticsToggleBtnText, showAnalytics && { color: HorizonColors.primary }]}>
+              Analytics
+            </Text>
+          </Pressable>
+
           {/* Import Google Sheet Button */}
           <Pressable
             style={({ pressed }) => [
@@ -116,6 +161,21 @@ export default function InventoryScreen() {
             <MaterialIcons name="cloud-download" size={18} color={HorizonColors.success} />
             <Text style={styles.importBtnText}>Import sheet</Text>
           </Pressable>
+
+          {/* Clear All Button */}
+          {inventoryItems.length > 0 && (
+            <Pressable
+              style={({ pressed }) => [
+                styles.clearAllBtn,
+                pressed && styles.clearAllBtnPressed,
+              ]}
+              onPress={handleClearAll}>
+              <MaterialIcons name="delete-sweep" size={18} color="#EF4444" />
+              <Text style={styles.clearAllBtnText}>Clear database</Text>
+            </Pressable>
+          )}
+
+
 
           {/* Add Product Button */}
           <Pressable
@@ -130,11 +190,17 @@ export default function InventoryScreen() {
         </View>
       </View>
 
+      {/* Analytics Dashboard */}
+      {showAnalytics && (
+        <InventoryAnalytics items={filteredItems} />
+      )}
+
       {/* Main Table Card */}
       <InventoryTableCard
         items={inventoryItems}
         onEdit={handleEditPress}
         onDelete={handleDeleteConfirm}
+        onFilteredItemsChange={setFilteredItems}
       />
 
       {/* Add / Edit Popup Modal */}
@@ -251,5 +317,49 @@ const styles = StyleSheet.create({
     color: HorizonColors.textMuted,
     textAlign: 'center',
     lineHeight: 22,
+  },
+  analyticsToggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1.5,
+    borderColor: HorizonColors.border,
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    backgroundColor: '#FAFBFD',
+  },
+  analyticsToggleBtnActive: {
+    borderColor: HorizonColors.primary,
+    backgroundColor: HorizonColors.primaryLight,
+  },
+  analyticsToggleBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: HorizonColors.text,
+  },
+
+  btnPressed: {
+    opacity: 0.85,
+  },
+  clearAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1.5,
+    borderColor: '#FCA5A5',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    backgroundColor: '#FAFBFD',
+  },
+  clearAllBtnPressed: {
+    backgroundColor: '#FEE2E2',
+    opacity: 0.9,
+  },
+  clearAllBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#EF4444',
   },
 });
