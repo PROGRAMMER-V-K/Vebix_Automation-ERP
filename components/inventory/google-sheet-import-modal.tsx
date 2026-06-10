@@ -150,6 +150,7 @@ export function GoogleSheetImportModal({
       const priceIdx = headers.findIndex((h) => h.includes('price') || h.includes('rate') || h.includes('cost') || h.includes('amount'));
       
       // Optional columns
+      const locationIdx = headers.findIndex((h) => h.includes('location') || h.includes('place') || h.includes('loc'));
       const categoryIdx = headers.findIndex((h) => h.includes('category') || h.includes('type') || h.includes('cat'));
       const qtyIdx = headers.findIndex((h) => h.includes('qty') || h.includes('quantity') || h.includes('stock') || h.includes('count'));
       const codeIdx = headers.findIndex((h) => h.includes('code') || h.includes('sku') || h.includes('id'));
@@ -216,6 +217,7 @@ export function GoogleSheetImportModal({
         invoiceIdx,
         projectIdx,
         priceIdx,
+        locationIdx,
         categoryIdx,
         qtyIdx,
         codeIdx,
@@ -274,7 +276,7 @@ export function GoogleSheetImportModal({
         }
 
         const finalInvoiceNo = invoiceNo || '—';
-        const finalProject = project || 'General';
+        const finalProject = project || '-';
         const finalPrice = isNaN(price) ? 0 : price;
 
         const key = `${finalInvoiceNo.toLowerCase().trim()}_${name.toLowerCase().trim()}_${finalProject.toLowerCase().trim()}`;
@@ -289,7 +291,9 @@ export function GoogleSheetImportModal({
         seenInSheet.add(key);
 
         // Read optional values safely
-        const category = categoryIdx !== -1 && row[categoryIdx] ? row[categoryIdx].trim() : 'General';
+        const location = locationIdx !== -1 && row[locationIdx]
+          ? row[locationIdx].trim()
+          : (categoryIdx !== -1 && row[categoryIdx] ? row[categoryIdx].trim() : 'IN');
         const rawQty = qtyIdx !== -1 && row[qtyIdx] ? parseInt(row[qtyIdx].replace(/\D/g, ''), 10) : 1;
         const quantity = isNaN(rawQty) || rawQty <= 0 ? 1 : rawQty;
         const code = codeIdx !== -1 && row[codeIdx] ? row[codeIdx].trim() : `INV-${Math.floor(10000 + Math.random() * 90000)}`;
@@ -304,7 +308,7 @@ export function GoogleSheetImportModal({
           invoiceNo: finalInvoiceNo,
           project: finalProject,
           price: finalPrice,
-          category,
+          location,
           quantity,
           code,
           date,

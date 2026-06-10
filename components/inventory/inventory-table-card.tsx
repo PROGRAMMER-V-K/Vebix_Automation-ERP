@@ -24,20 +24,75 @@ import {
 import { HorizonColors } from '@/constants/horizon';
 import { InventoryItem } from '@/types/inventory';
 
+// Robust date parsing helper for DD/MM/YYYY, MM/DD/YYYY, and YYYY-MM-DD formats
+function parseItemDate(dateStr: string): { year: number; month: number } | null {
+  if (!dateStr) return null;
+  const trimmed = dateStr.trim();
+  let parts: string[] = [];
+
+  if (trimmed.includes('-')) {
+    parts = trimmed.split('-');
+  } else if (trimmed.includes('/')) {
+    parts = trimmed.split('/');
+  } else {
+    return null;
+  }
+
+  if (parts.length !== 3) return null;
+
+  let y = 0;
+  let m = 0; // 1-indexed initially
+
+  // Check if year is at the beginning (e.g. YYYY-MM-DD)
+  if (parts[0].length === 4) {
+    y = parseInt(parts[0], 10);
+    m = parseInt(parts[1], 10);
+  } else {
+    // Year is at the end (e.g. DD/MM/YYYY or MM/DD/YYYY)
+    y = parseInt(parts[2], 10);
+    const valA = parseInt(parts[0], 10);
+    const valB = parseInt(parts[1], 10);
+
+    if (isNaN(valA) || isNaN(valB) || isNaN(y)) return null;
+
+    if (valA > 12 && valB <= 12) {
+      // Format must be DD/MM/YYYY
+      m = valB;
+    } else if (valB > 12 && valA <= 12) {
+      // Format must be MM/DD/YYYY
+      m = valA;
+    } else {
+      // Both <= 12, default to DD/MM/YYYY
+      m = valB;
+    }
+  }
+
+  if (isNaN(y) || isNaN(m) || m < 1 || m > 12) return null;
+  return { year: y, month: m - 1 };
+}
+
 type InventoryTableCardProps = {
   items: InventoryItem[];
   onEdit: (item: InventoryItem) => void;
   onDelete: (id: string) => void;
   onFilteredItemsChange?: (items: InventoryItem[]) => void;
+  selectedProjects: string[];
+  onSelectedProjectsChange: (projects: string[]) => void;
+  selectedMonth: string | null;
+  onSelectedMonthChange: (month: string | null) => void;
 };
 
-const CATEGORIES = ['All', 'Device', 'Electronic',  'General'];
+const LOCATIONS = ['All', 'IN', 'OUT'];
 
 export function InventoryTableCard({
   items,
   onEdit,
   onDelete,
   onFilteredItemsChange,
+  selectedProjects,
+  onSelectedProjectsChange,
+  selectedMonth,
+  onSelectedMonthChange,
 }: InventoryTableCardProps) {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 768;
@@ -47,23 +102,25 @@ export function InventoryTableCard({
   
   // Inline filters
   const [filterName, setFilterName] = useState('');
-  const [filterCategory, setFilterCategory] = useState('All');
+  const [filterLocation, setFilterLocation] = useState('All');
   const [filterCode, setFilterCode] = useState('');
   const [filterDate, setFilterDate] = useState('');
 
-  // Dropdown visibility for Category filter
-  const [showCatDropdown, setShowCatDropdown] = useState(false);
+  // Dropdown visibility for Location filter
+  const [showLocDropdown, setShowLocDropdown] = useState(false);
 
   // Reset all filters
   const handleResetFilters = () => {
     setSearchQuery('');
     setFilterName('');
-    setFilterCategory('All');
+    setFilterLocation('All');
     setFilterCode('');
     setFilterDate('');
+    onSelectedProjectsChange([]);
+    onSelectedMonthChange(null);
   };
 
-  // Filter logic
+  // Filter logic for general queries (sent to Analytics component)
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
       // 1. General search bar query
@@ -74,7 +131,7 @@ export function InventoryTableCard({
           item.code.toLowerCase().includes(q) ||
           item.invoiceNo.toLowerCase().includes(q) ||
           item.project.toLowerCase().includes(q) ||
-          item.category.toLowerCase().includes(q);
+          item.location.toLowerCase().includes(q);
         if (!matchesSearch) return false;
       }
 
@@ -85,9 +142,9 @@ export function InventoryTableCard({
         }
       }
 
-      // 3. Specific field: Category
-      if (filterCategory !== 'All') {
-        if (item.category.toLowerCase() !== filterCategory.toLowerCase()) {
+      // 3. Specific field: Location
+      if (filterLocation !== 'All') {
+        if (item.location.toLowerCase() !== filterLocation.toLowerCase()) {
           return false;
         }
       }
@@ -123,10 +180,39 @@ export function InventoryTableCard({
 
       return true;
     });
-  }, [items, searchQuery, filterName, filterCategory, filterCode, filterDate]);
+  }, [items, searchQuery, filterName, filterLocation, filterCode, filterDate]);
+
+  // Table items filtered by selected projects & selected month
+  const tableFilteredItems = useMemo(() => {
+    let result = filteredItems;
+
+    if (selectedProjects.length > 0) {
+      result = result.filter((item) => {
+        const proj = item.project.trim() || '-';
+        return selectedProjects.includes(proj);
+      });
+    }
+
+    if (selectedMonth) {
+      result = result.filter((item) => {
+        const parsed = parseItemDate(item.date);
+        if (!parsed) return false;
+        const key = `${parsed.year}-${String(parsed.month + 1).padStart(2, '0')}`;
+        return key === selectedMonth;
+      });
+    }
+
+    return result;
+  }, [filteredItems, selectedProjects, selectedMonth]);
 
   useEffect(() => {
-    onFilteredItemsChange?.(filteredItems);
+    const handler = setTimeout(() => {
+      onFilteredItemsChange?.(filteredItems);
+    }, 250);
+
+    return () => {
+      clearTimeout(handler);
+    };
   }, [filteredItems, onFilteredItemsChange]);
 
   function handleDeletePress(item: InventoryItem) {
@@ -166,7 +252,7 @@ export function InventoryTableCard({
       <Text style={[styles.columnHeader, styles.colCodeFlex]}>CODE</Text>
       <Text style={[styles.columnHeader, styles.colInvoiceFlex]}>INVOICE</Text>
       <Text style={[styles.columnHeader, styles.colProjectFlex]}>PROJECT</Text>
-      <Text style={[styles.columnHeader, styles.colCategoryFlex]}>CATEGORY</Text>
+      <Text style={[styles.columnHeader, styles.colCategoryFlex]}>LOCATION</Text>
       <Text style={[styles.columnHeader, styles.colQtyFlex, { textAlign: 'center' }]}>QTY</Text>
       <Text style={[styles.columnHeader, styles.colPriceFlex, { textAlign: 'right' }]}>PRICE</Text>
       <Text style={[styles.columnHeader, styles.colDateFlex, { textAlign: 'center' }]}>DATE</Text>
@@ -209,9 +295,9 @@ export function InventoryTableCard({
           {item.project}
         </Text>
 
-        {/* Category Column */}
+        {/* Location Column */}
         <Text style={[styles.colValue, styles.colCategoryFlex]} numberOfLines={1}>
-          {item.category}
+          {item.location}
         </Text>
 
         {/* Quantity Column */}
@@ -242,6 +328,75 @@ export function InventoryTableCard({
     );
   };
 
+  // Mobile Card Renderer for native-friendly mobile viewports
+  const MobileItemCard = ({ item }: { item: InventoryItem }) => {
+    return (
+      <View style={styles.mobileCard}>
+        {/* Name and Code badge */}
+        <View style={styles.mobileCardHeader}>
+          <Text style={styles.mobileCardName} numberOfLines={1}>
+            {item.name}
+          </Text>
+          <View style={styles.mobileCardCodeBadge}>
+            <Text style={styles.mobileCardCodeText}>{item.code}</Text>
+          </View>
+        </View>
+
+        {/* Project, Invoice No tags */}
+        <View style={styles.mobileCardInfoRow}>
+          <View style={styles.mobileCardTag}>
+            <MaterialIcons name="business" size={14} color={HorizonColors.textMuted} />
+            <Text style={styles.mobileCardTagText} numberOfLines={1}>
+              {item.project || '—'}
+            </Text>
+          </View>
+          <View style={styles.mobileCardTag}>
+            <MaterialIcons name="receipt" size={14} color={HorizonColors.textMuted} />
+            <Text style={styles.mobileCardTagText} numberOfLines={1}>
+              {item.invoiceNo || '—'}
+            </Text>
+          </View>
+        </View>
+
+        {/* Quantity, Location, Price, and Actions row */}
+        <View style={styles.mobileCardFooter}>
+          <View style={styles.mobileCardStats}>
+            <Text style={styles.mobileCardPrice}>
+              ₹{item.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </Text>
+            <View style={styles.mobileCardBadges}>
+              <View style={styles.mobileQtyBadge}>
+                <Text style={styles.mobileQtyText}>Qty: {item.quantity}</Text>
+              </View>
+              <View style={[
+                styles.mobileLocBadge,
+                item.location === 'IN' ? styles.mobileLocIn : styles.mobileLocOut
+              ]}>
+                <Text style={[
+                  styles.mobileLocText,
+                  item.location === 'IN' ? styles.mobileLocInText : styles.mobileLocOutText
+                ]}>
+                  {item.location}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.mobileCardActions}>
+            <Pressable style={styles.mobileActionBtn} hitSlop={8} onPress={() => onEdit(item)}>
+              <MaterialIcons name="edit" size={16} color={HorizonColors.primary} />
+            </Pressable>
+            <Pressable style={[styles.mobileActionBtn, styles.mobileDeleteBtn]} hitSlop={8} onPress={() => handleDeletePress(item)}>
+              <MaterialIcons name="delete-outline" size={16} color="#EF4444" />
+            </Pressable>
+          </View>
+        </View>
+
+        <Text style={styles.mobileCardDate}>Date: {displayDate(item.date)}</Text>
+      </View>
+    );
+  };
+
   return (
     <View style={styles.card}>
       {/* Search & Action Bar */}
@@ -257,7 +412,7 @@ export function InventoryTableCard({
           />
         </View>
         <View style={styles.actionButtons}>
-          {!!(filterName || filterCategory !== 'All' || filterCode || filterDate || searchQuery) && (
+          {!!(filterName || filterLocation !== 'All' || filterCode || filterDate || searchQuery || selectedProjects.length > 0 || selectedMonth) && (
             <Pressable onPress={handleResetFilters} style={styles.resetFilterBtn} hitSlop={8}>
               <Text style={styles.resetFilterText}>Clear Filters</Text>
             </Pressable>
@@ -273,6 +428,47 @@ export function InventoryTableCard({
           </Pressable>
         </View>
       </View>
+
+      {/* Active Project Filter Pills */}
+      {selectedProjects.length > 0 ? (
+        <View style={styles.activeProjectsRow}>
+          <Text style={styles.activeProjectsLabel}>Filtering Projects:</Text>
+          <View style={styles.activeProjectsPillList}>
+            {selectedProjects.map((proj) => (
+              <Pressable
+                key={proj}
+                onPress={() => onSelectedProjectsChange(selectedProjects.filter((p) => p !== proj))}
+                style={styles.projectPill}
+              >
+                <Text style={styles.projectPillText}>{proj}</Text>
+                <MaterialIcons name="close" size={12} color={HorizonColors.primary} />
+              </Pressable>
+            ))}
+            <Pressable
+              onPress={() => onSelectedProjectsChange([])}
+              style={styles.clearProjectsBtn}
+            >
+              <Text style={styles.clearProjectsBtnText}>Clear Project Filters</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+
+      {/* Active Month Filter Pill */}
+      {selectedMonth ? (
+        <View style={styles.activeMonthRow}>
+          <Text style={styles.activeMonthLabel}>Selected Month:</Text>
+          <View style={styles.activeMonthPillList}>
+            <Pressable
+              onPress={() => onSelectedMonthChange(null)}
+              style={styles.monthPill}
+            >
+              <Text style={styles.monthPillText}>{selectedMonth}</Text>
+              <MaterialIcons name="close" size={12} color={HorizonColors.primary} />
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
 
       {/* Collapsible Filter Section */}
       {showFilters ? (
@@ -290,31 +486,31 @@ export function InventoryTableCard({
               />
             </View>
 
-            {/* Filter Category */}
+            {/* Filter Location */}
             <View style={[styles.filterField, isDesktop ? { flex: 1 } : { width: '47%' }, { zIndex: 10 }]}>
-              <Text style={styles.filterLabel}>Category</Text>
+              <Text style={styles.filterLabel}>Location</Text>
               <View style={{ position: 'relative', zIndex: 20 }}>
                 <Pressable
                   style={styles.dropdownSelector}
-                  onPress={() => setShowCatDropdown(!showCatDropdown)}>
-                  <Text style={[styles.dropdownValue, filterCategory === 'All' && { color: HorizonColors.textMuted }]}>
-                    {filterCategory === 'All' ? 'Select category' : filterCategory}
+                  onPress={() => setShowLocDropdown(!showLocDropdown)}>
+                  <Text style={[styles.dropdownValue, filterLocation === 'All' && { color: HorizonColors.textMuted }]}>
+                    {filterLocation === 'All' ? 'Select location' : filterLocation}
                   </Text>
                   <MaterialIcons name="keyboard-arrow-down" size={18} color={HorizonColors.textMuted} />
                 </Pressable>
 
-                {showCatDropdown ? (
+                {showLocDropdown ? (
                   <View style={styles.dropdownList}>
-                    {CATEGORIES.map((cat) => (
+                    {LOCATIONS.map((loc) => (
                       <Pressable
-                        key={cat}
+                        key={loc}
                         style={styles.dropdownItem}
                         onPress={() => {
-                          setFilterCategory(cat);
-                          setShowCatDropdown(false);
+                          setFilterLocation(loc);
+                          setShowLocDropdown(false);
                         }}>
-                        <Text style={[styles.dropdownItemText, filterCategory === cat && styles.dropdownItemTextActive]}>
-                          {cat === 'All' ? 'All Categories' : cat}
+                        <Text style={[styles.dropdownItemText, filterLocation === loc && styles.dropdownItemTextActive]}>
+                          {loc === 'All' ? 'All Locations' : loc}
                         </Text>
                       </Pressable>
                     ))}
@@ -353,27 +549,42 @@ export function InventoryTableCard({
         </View>
       ) : null}
 
-      {/* Spreadsheet / Data Table with horizontal scroll support on all viewports */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={true}
-        contentContainerStyle={{ flexGrow: 1 }}
-        style={styles.tableScroll}
-      >
-        <View style={[styles.table, { minWidth: 920, width: '100%' }]}>
-          <TableHeader />
-          {filteredItems.length === 0 ? (
+      {/* Spreadsheet / Data Table on desktop, Card-based list on mobile */}
+      {isDesktop ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={true}
+          contentContainerStyle={{ flexGrow: 1 }}
+          style={styles.tableScroll}
+        >
+          <View style={[styles.table, { minWidth: 920, width: '100%' }]}>
+            <TableHeader />
+            {tableFilteredItems.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <MaterialIcons name="inventory" size={48} color={HorizonColors.iconMuted} />
+                <Text style={styles.emptyText}>No products found matching filters.</Text>
+              </View>
+            ) : (
+              tableFilteredItems.map((item, index) => (
+                <TableRow key={item.id} item={item} index={index} />
+              ))
+            )}
+          </View>
+        </ScrollView>
+      ) : (
+        <View style={styles.mobileListContainer}>
+          {tableFilteredItems.length === 0 ? (
             <View style={styles.emptyContainer}>
               <MaterialIcons name="inventory" size={48} color={HorizonColors.iconMuted} />
               <Text style={styles.emptyText}>No products found matching filters.</Text>
             </View>
           ) : (
-            filteredItems.map((item, index) => (
-              <TableRow key={item.id} item={item} index={index} />
+            tableFilteredItems.map((item) => (
+              <MobileItemCard key={item.id} item={item} />
             ))
           )}
         </View>
-      </ScrollView>
+      )}
     </View>
   );
 }
@@ -655,5 +866,227 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 14,
     color: HorizonColors.textMuted,
+  },
+  activeProjectsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    gap: 8,
+  },
+  activeProjectsLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748B',
+    textTransform: 'uppercase',
+  },
+  activeProjectsPillList: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  projectPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: HorizonColors.primaryLight,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    gap: 6,
+  },
+  projectPillText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1E3A5F',
+  },
+  clearProjectsBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  clearProjectsBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#EF4444',
+  },
+  activeMonthRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    gap: 8,
+  },
+  activeMonthLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748B',
+    textTransform: 'uppercase',
+  },
+  activeMonthPillList: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  monthPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: HorizonColors.primaryLight,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    gap: 6,
+  },
+  monthPillText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1E3A5F',
+  },
+  mobileListContainer: {
+    padding: 16,
+    backgroundColor: '#FCFDFE',
+  },
+  mobileCard: {
+    backgroundColor: HorizonColors.white,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: HorizonColors.border,
+    padding: 14,
+    marginBottom: 12,
+    shadowColor: '#1E3A5F',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.02,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  mobileCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    gap: 8,
+  },
+  mobileCardName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#1E3A5F',
+    flex: 1,
+  },
+  mobileCardCodeBadge: {
+    backgroundColor: '#F1F5F9',
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
+  mobileCardCodeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  mobileCardInfoRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
+  mobileCardTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FAFBFD',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    maxWidth: 150,
+  },
+  mobileCardTagText: {
+    fontSize: 12,
+    color: '#64748B',
+    fontWeight: '500',
+  },
+  mobileCardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    paddingTop: 10,
+    marginTop: 2,
+  },
+  mobileCardStats: {
+    gap: 6,
+    flex: 1,
+  },
+  mobileCardPrice: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1E3A5F',
+  },
+  mobileCardBadges: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  mobileQtyBadge: {
+    backgroundColor: '#EFF6FF',
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    borderRadius: 6,
+  },
+  mobileQtyText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#2563EB',
+  },
+  mobileLocBadge: {
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
+  mobileLocIn: {
+    backgroundColor: '#DCFCE7',
+  },
+  mobileLocOut: {
+    backgroundColor: '#FEE2E2',
+  },
+  mobileLocText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  mobileLocInText: {
+    color: '#16A34A',
+  },
+  mobileLocOutText: {
+    color: '#EF4444',
+  },
+  mobileCardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  mobileActionBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mobileDeleteBtn: {
+    backgroundColor: '#FEE2E2',
+  },
+  mobileCardDate: {
+    fontSize: 11,
+    color: '#94A3B8',
+    marginTop: 8,
+    textAlign: 'right',
   },
 });

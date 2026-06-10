@@ -215,12 +215,18 @@ export function LoginScreen() {
     }
 
     setLoading(true);
-    const result = isSignUp
-      ? await signUpWithEmail(email, password)
-      : await signInWithEmail(email, password);
-    setLoading(false);
-
-    if (!result.ok) Alert.alert(isSignUp ? 'Sign up' : 'Sign in', result.message);
+    try {
+      const result = isSignUp
+        ? await signUpWithEmail(email, password)
+        : await signInWithEmail(email, password);
+      if (!result.ok) {
+        Alert.alert(isSignUp ? 'Sign up' : 'Sign in', result.message);
+      }
+    } catch (error) {
+      Alert.alert('Error', error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleGoogleSignIn() {

@@ -9,8 +9,10 @@ import {
   ActivityIndicator,
   Alert,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 
@@ -23,34 +25,18 @@ import { useInventory } from '@/hooks/use-inventory';
 import { InventoryItem, NewInventoryItem } from '@/types/inventory';
 
 export default function InventoryScreen() {
-  const { inventoryItems, loading, error, addItem, updateItem, deleteItem, importItems, clearAll, isConfigured } = useInventory();
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= 768;
+  const { inventoryItems, loading, error, addItem, updateItem, deleteItem, importItems, isConfigured } = useInventory();
   const [modalVisible, setModalVisible] = useState(false);
   const [sheetModalVisible, setSheetModalVisible] = useState(false);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [showAnalytics, setShowAnalytics] = useState(true);
   const [filteredItems, setFilteredItems] = useState<InventoryItem[]>([]);
+  const [selectedProjects, setSelectedProjects] = useState<string[]>([]);
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
 
-  async function handleClearAll() {
-    Alert.alert(
-      'Clear Database',
-      'Are you sure you want to delete ALL inventory products from the database? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete All',
-          style: 'destructive',
-          onPress: async () => {
-            const res = await clearAll();
-            if (res.ok) {
-              Alert.alert('Success', 'Inventory database cleared successfully.');
-            } else {
-              Alert.alert('Error', res.message || 'Failed to clear inventory.');
-            }
-          },
-        },
-      ],
-    );
-  }
+ 
 
 
 
@@ -124,7 +110,7 @@ export default function InventoryScreen() {
   return (
     <View style={styles.container}>
       {/* Header Area */}
-      <View style={styles.header}>
+      <View style={isDesktop ? styles.headerWide : styles.headerMobile}>
         <View>
           <Text style={styles.title}>Inventory List</Text>
           <Text style={styles.subtitle}>
@@ -132,7 +118,12 @@ export default function InventoryScreen() {
           </Text>
         </View>
 
-        <View style={styles.actionHeaderRow}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.actionHeaderScroll}
+          contentContainerStyle={styles.actionHeaderRow}
+        >
           {/* Toggle Analytics Button */}
           <Pressable
             style={({ pressed }) => [
@@ -162,21 +153,6 @@ export default function InventoryScreen() {
             <Text style={styles.importBtnText}>Import sheet</Text>
           </Pressable>
 
-          {/* Clear All Button */}
-          {inventoryItems.length > 0 && (
-            <Pressable
-              style={({ pressed }) => [
-                styles.clearAllBtn,
-                pressed && styles.clearAllBtnPressed,
-              ]}
-              onPress={handleClearAll}>
-              <MaterialIcons name="delete-sweep" size={18} color="#EF4444" />
-              <Text style={styles.clearAllBtnText}>Clear database</Text>
-            </Pressable>
-          )}
-
-
-
           {/* Add Product Button */}
           <Pressable
             style={({ pressed }) => [
@@ -187,12 +163,18 @@ export default function InventoryScreen() {
             <MaterialIcons name="add" size={18} color={HorizonColors.white} />
             <Text style={styles.addProductBtnText}>Add product</Text>
           </Pressable>
-        </View>
+        </ScrollView>
       </View>
 
       {/* Analytics Dashboard */}
       {showAnalytics && (
-        <InventoryAnalytics items={filteredItems} />
+        <InventoryAnalytics
+          items={filteredItems}
+          selectedProjects={selectedProjects}
+          onSelectedProjectsChange={setSelectedProjects}
+          selectedMonth={selectedMonth}
+          onSelectedMonthChange={setSelectedMonth}
+        />
       )}
 
       {/* Main Table Card */}
@@ -201,6 +183,10 @@ export default function InventoryScreen() {
         onEdit={handleEditPress}
         onDelete={handleDeleteConfirm}
         onFilteredItemsChange={setFilteredItems}
+        selectedProjects={selectedProjects}
+        onSelectedProjectsChange={setSelectedProjects}
+        selectedMonth={selectedMonth}
+        onSelectedMonthChange={setSelectedMonth}
       />
 
       {/* Add / Edit Popup Modal */}
@@ -235,12 +221,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 64,
   },
-  header: {
+  headerWide: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 16,
-    flexWrap: 'wrap',
+    marginBottom: 8,
+  },
+  headerMobile: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 12,
     marginBottom: 8,
   },
   title: {
@@ -254,10 +245,14 @@ const styles = StyleSheet.create({
     color: HorizonColors.textMuted,
     lineHeight: 20,
   },
+  actionHeaderScroll: {
+    flexGrow: 0,
+  },
   actionHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
+    paddingBottom: 4,
   },
   importBtn: {
     flexDirection: 'row',

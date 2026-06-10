@@ -1,7 +1,7 @@
 /**
  * Redirects unauthenticated users to /login and signed-in users away from auth screens.
  */
-import { Href, usePathname, useRouter } from 'expo-router';
+import { Href, useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
@@ -12,20 +12,22 @@ const LOGIN_PATH = '/login' as Href;
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
-  const pathname = usePathname();
+  const segments = useSegments();
   const router = useRouter();
-
-  const isLoginScreen = pathname === '/login' || pathname.endsWith('/login');
 
   useEffect(() => {
     if (loading) return;
 
-    if (!user && !isLoginScreen) {
+    const inAuthGroup = segments[0] === '(auth)';
+    const inDashboardGroup = segments[0] === '(dashboard)';
+
+
+    if (!user && !inAuthGroup) {
       router.replace(LOGIN_PATH);
-    } else if (user && isLoginScreen) {
+    } else if (user && !inDashboardGroup) {
       router.replace('/');
     }
-  }, [user, loading, isLoginScreen, router]);
+  }, [user, loading, segments, router]);
 
   if (loading) {
     return (

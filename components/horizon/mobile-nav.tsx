@@ -21,25 +21,25 @@ export function MobileNav() {
     <View style={styles.wrap}>
       <View style={styles.topRow}>
         <View style={styles.logoRow}>
-          <View style={styles.logoIcon}>
-            <MaterialIcons name="business" size={20} color={HorizonColors.white} />
-          </View>
+          <Image
+            source={{ uri: user.photoUrl ?? `https://i.pravatar.cc/80?u=${user.id}` }}
+            style={styles.headerAvatar}
+          />
           <View style={styles.logoTextBlock}>
             <Text style={styles.logoText} numberOfLines={1}>
               {APP_BRAND.name}
             </Text>
             <Text style={styles.userEmail} numberOfLines={1}>
-              {user.email || user.name}
+              {user.name}
             </Text>
           </View>
         </View>
 
         <Pressable
           onPress={signOut}
-          style={({ pressed }) => [styles.logoutBtn, pressed && styles.logoutBtnPressed]}
+          style={({ pressed }) => [styles.logoutIconBtn, pressed && styles.logoutBtnPressed]}
           hitSlop={8}>
-          <MaterialIcons name="logout" size={20} color={HorizonColors.white} />
-          <Text style={styles.logoutText}>Logout</Text>
+          <MaterialIcons name="logout" size={18} color={HorizonColors.primary} />
         </Pressable>
       </View>
 
@@ -64,18 +64,6 @@ export function MobileNav() {
           );
         })}
       </ScrollView>
-
-      <Pressable onPress={signOut} style={styles.userStrip}>
-        <Image
-          source={{ uri: user.photoUrl ?? `https://i.pravatar.cc/80?u=${user.id}` }}
-          style={styles.avatar}
-        />
-        <View style={styles.userInfo}>
-          <Text style={styles.userName}>{user.name}</Text>
-          <Text style={styles.userHint}>Tap to sign out</Text>
-        </View>
-        <MaterialIcons name="chevron-right" size={22} color={HorizonColors.textMuted} />
-      </Pressable>
     </View>
   );
 }
@@ -85,15 +73,15 @@ const styles = StyleSheet.create({
     backgroundColor: HorizonColors.sidebar,
     borderBottomWidth: 1,
     borderBottomColor: HorizonColors.border,
-    paddingBottom: 8,
+    paddingBottom: 4,
   },
   topRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 12,
+    paddingTop: 10,
     paddingHorizontal: 16,
-    paddingBottom: 10,
+    paddingBottom: 8,
     gap: 12,
   },
   logoRow: {
@@ -103,14 +91,11 @@ const styles = StyleSheet.create({
     gap: 10,
     minWidth: 0,
   },
-  logoIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-    backgroundColor: HorizonColors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
+  headerAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#E2E8F0',
   },
   logoTextBlock: {
     flex: 1,
@@ -124,25 +109,22 @@ const styles = StyleSheet.create({
   userEmail: {
     fontSize: 11,
     color: HorizonColors.textMuted,
-    marginTop: 2,
+    marginTop: 1,
   },
-  logoutBtn: {
-    flexDirection: 'row',
+  logoutIconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FAFBFD',
+    borderWidth: 1.5,
+    borderColor: HorizonColors.border,
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: HorizonColors.primary,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
+    justifyContent: 'center',
     flexShrink: 0,
   },
   logoutBtnPressed: {
-    opacity: 0.88,
-  },
-  logoutText: {
-    color: HorizonColors.white,
-    fontSize: 14,
-    fontWeight: '600',
+    opacity: 0.75,
+    backgroundColor: '#F1F5F9',
   },
   nav: {
     paddingHorizontal: 16,
@@ -172,36 +154,5 @@ const styles = StyleSheet.create({
   chipLabelActive: {
     color: HorizonColors.primary,
     fontWeight: '600',
-  },
-  userStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginHorizontal: 16,
-    marginTop: 4,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    backgroundColor: HorizonColors.background,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: HorizonColors.border,
-  },
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-  },
-  userInfo: {
-    flex: 1,
-  },
-  userName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: HorizonColors.text,
-  },
-  userHint: {
-    fontSize: 12,
-    color: HorizonColors.textMuted,
-    marginTop: 2,
   },
 });

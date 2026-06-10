@@ -51,6 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const auth = getFirebaseAuth();
         unsubscribe = onAuthStateChanged(auth, (nextUser) => {
+          console.log('[Auth] onAuthStateChanged triggered. User email:', nextUser?.email ?? 'null');
           setUser(nextUser);
           setLoading(false);
         });
@@ -74,10 +75,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signInWithEmail = useCallback(
     async (email: string, password: string) => {
       try {
+        console.log('[Auth] signInWithEmail calling getFirebaseAuth');
         const auth = getFirebaseAuth();
+        console.log('[Auth] calling signInWithEmailAndPassword');
         await signInWithEmailAndPassword(auth, email.trim(), password);
+        console.log('[Auth] signInWithEmailAndPassword completed!');
         return { ok: true as const };
       } catch (err) {
+        console.error('[Auth] Error in signInWithEmail:', err);
         return { ok: false as const, message: formatAuthError(err) };
       }
     },

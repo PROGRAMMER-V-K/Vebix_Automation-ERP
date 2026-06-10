@@ -18,7 +18,7 @@ import {
 import { HorizonColors } from '@/constants/horizon';
 import { InventoryItem, NewInventoryItem } from '@/types/inventory';
 
-const CATEGORIES = ['Device', 'Electronic', 'General'];
+const LOCATIONS = ['IN', 'OUT'];
 
 type AddProductModalProps = {
   visible: boolean;
@@ -38,7 +38,7 @@ export function AddProductModal({
   const [project, setProject] = useState('');
   const [price, setPrice] = useState('');
   const [quantity, setQuantity] = useState('1');
-  const [category, setCategory] = useState('General');
+  const [location, setLocation] = useState('IN');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
@@ -50,14 +50,14 @@ export function AddProductModal({
       setProject(editingItem.project);
       setPrice(String(editingItem.price));
       setQuantity(String(editingItem.quantity));
-      setCategory(editingItem.category);
+      setLocation(editingItem.location || 'IN');
     } else {
       setName('');
       setInvoiceNo('');
       setProject('');
       setPrice('');
       setQuantity('1');
-      setCategory('General');
+      setLocation('IN');
     }
     setErrors({});
   }, [editingItem, visible]);
@@ -67,7 +67,7 @@ export function AddProductModal({
     if (!name.trim()) nextErrors.name = 'Product name is required';
     if (!invoiceNo.trim()) nextErrors.invoiceNo = 'Invoice number is required';
     if (!project.trim()) nextErrors.project = 'Project is required';
-    
+
     const parsedPrice = parseFloat(price);
     if (!price.trim()) {
       nextErrors.price = 'Price is required';
@@ -96,7 +96,7 @@ export function AddProductModal({
       project: project.trim(),
       price: parseFloat(price),
       quantity: parseInt(quantity, 10),
-      category,
+      location,
       code: editingItem?.code || `INV-${Math.floor(10000 + Math.random() * 90000)}`,
       date: editingItem?.date || new Date().toISOString().split('T')[0],
     };
@@ -133,7 +133,7 @@ export function AddProductModal({
           <ScrollView
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.scrollContent}>
-            
+
             {errors.form ? (
               <View style={styles.formErrorBox}>
                 <MaterialIcons name="error-outline" size={18} color="#DC2626" />
@@ -194,7 +194,7 @@ export function AddProductModal({
               <View style={[styles.field, { flex: 1 }]}>
                 <Text style={styles.label}>Price *</Text>
                 <View style={styles.priceContainer}>
-                  <Text style={styles.currencyPrefix}>$</Text>
+                  <Text style={styles.currencyPrefix}>₹</Text>
                   <TextInput
                     style={[styles.input, styles.priceInput, errors.price && styles.inputError]}
                     placeholder="0.00"
@@ -227,26 +227,26 @@ export function AddProductModal({
               </View>
             </View>
 
-            {/* Category selection */}
+            {/* Location selection */}
             <View style={styles.field}>
-              <Text style={styles.label}>Category</Text>
-              <View style={styles.categoryRow}>
-                {CATEGORIES.map((cat) => {
-                  const isSelected = category === cat;
+              <Text style={styles.label}>Location</Text>
+              <View style={styles.locationRow}>
+                {LOCATIONS.map((loc) => {
+                  const isSelected = location === loc;
                   return (
                     <Pressable
-                      key={cat}
-                      onPress={() => setCategory(cat)}
+                      key={loc}
+                      onPress={() => setLocation(loc)}
                       style={[
-                        styles.categoryPill,
-                        isSelected && styles.categoryPillActive,
+                        styles.locationPill,
+                        isSelected && styles.locationPillActive,
                       ]}>
                       <Text
                         style={[
-                          styles.categoryPillText,
-                          isSelected && styles.categoryPillTextActive,
+                          styles.locationPillText,
+                          isSelected && styles.locationPillTextActive,
                         ]}>
-                        {cat}
+                        {loc}
                       </Text>
                     </Pressable>
                   );
@@ -399,13 +399,13 @@ const styles = StyleSheet.create({
     color: '#EF4444',
     fontWeight: '500',
   },
-  categoryRow: {
+  locationRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
     marginTop: 4,
   },
-  categoryPill: {
+  locationPill: {
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
@@ -413,16 +413,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'transparent',
   },
-  categoryPillActive: {
+  locationPillActive: {
     backgroundColor: HorizonColors.primary,
     borderColor: HorizonColors.primaryDark,
   },
-  categoryPillText: {
+  locationPillText: {
     fontSize: 13,
     fontWeight: '600',
     color: HorizonColors.primary,
   },
-  categoryPillTextActive: {
+  locationPillTextActive: {
     color: HorizonColors.white,
   },
   footer: {

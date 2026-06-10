@@ -8,7 +8,7 @@ export interface InventoryItem {
   project: string;     // Project in which it is used
   price: number;       // Price of the product
   code: string;        // Product code (e.g. E23447 or INV-10023)
-  category: string;    // Product Category (e.g. Device, Electronic)
+  location: string;    // Location of the product: "IN" or "OUT"
   quantity: number;    // Quantity of products in stock
   date: string;        // Date associated with invoice/entry (Format: YYYY-MM-DD)
   createdAt: string;   // ISO String timestamp
