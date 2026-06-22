@@ -97,17 +97,23 @@ export function useInventory() {
     }
   }, []);
 
-  const importItems = useCallback(async (items: NewInventoryItem[]) => {
-    try {
-      await importInventoryItems(items, userName);
-      return { ok: true as const };
-    } catch (err) {
-      return {
-        ok: false as const,
-        message: err instanceof Error ? err.message : 'Failed to import inventory items.',
-      };
-    }
-  }, [userName]);
+  const importItems = useCallback(
+    async (
+      itemsToCreate: NewInventoryItem[],
+      itemsToUpdate: { id: string; data: Partial<NewInventoryItem> }[] = []
+    ) => {
+      try {
+        await importInventoryItems(itemsToCreate, itemsToUpdate, userName);
+        return { ok: true as const };
+      } catch (err) {
+        return {
+          ok: false as const,
+          message: err instanceof Error ? err.message : 'Failed to import inventory items.',
+        };
+      }
+    },
+    [userName],
+  );
 
   const clearAll = useCallback(async () => {
     try {

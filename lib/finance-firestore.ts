@@ -16,12 +16,14 @@ import {
 
 import { getFirestoreDb } from '@/lib/firebase';
 import {
-  Invoice,
-  Quotation,
   Expense,
-  NewInvoice,
-  NewQuotation,
+  Invoice,
   NewExpense,
+  NewInvoice,
+  NewPurchaseOrder,
+  NewQuotation,
+  PurchaseOrder,
+  Quotation,
 } from '@/types/finance';
 
 // Helper date parsing (same standard as inventory)
@@ -81,6 +83,8 @@ export function subscribeToInvoices(
           invoiceId: data.invoiceId ?? '',
           clientName: data.clientName ?? '',
           clientEmail: data.clientEmail ?? '',
+          clientAddress: data.clientAddress ?? '',
+          clientContact: data.clientContact ?? '',
           items: data.items ?? [],
           gstRate: Number(data.gstRate ?? 18),
           subtotal: Number(data.subtotal ?? 0),
@@ -89,6 +93,17 @@ export function subscribeToInvoices(
           dueDate: data.dueDate ?? '',
           date: data.date ?? '',
           status: data.status ?? 'Draft',
+          shipToName: data.shipToName ?? 'Vebix AUTOMATION',
+          shipToAddress: data.shipToAddress ?? '',
+          shipToContact: data.shipToContact ?? '',
+          shipToEmail: data.shipToEmail ?? '',
+          requisitioner: data.requisitioner ?? '',
+          shipVia: data.shipVia ?? '',
+          fob: data.fob ?? '',
+          shippingTerms: data.shippingTerms ?? '',
+          shippingAmount: Number(data.shippingAmount ?? 0),
+          otherAmount: Number(data.otherAmount ?? 0),
+          comments: data.comments ?? '',
           createdAt: data.createdAt ? (data.createdAt.toDate ? data.createdAt.toDate().toISOString() : String(data.createdAt)) : '',
           updatedAt: data.updatedAt ? (data.updatedAt.toDate ? data.updatedAt.toDate().toISOString() : String(data.updatedAt)) : '',
           updatedBy: data.updatedBy ?? 'System',
@@ -177,6 +192,8 @@ export function subscribeToQuotations(
           quoteId: data.quoteId ?? '',
           clientName: data.clientName ?? '',
           clientEmail: data.clientEmail ?? '',
+          clientAddress: data.clientAddress ?? '',
+          clientContact: data.clientContact ?? '',
           items: data.items ?? [],
           gstRate: Number(data.gstRate ?? 18),
           subtotal: Number(data.subtotal ?? 0),
@@ -185,6 +202,17 @@ export function subscribeToQuotations(
           validUntil: data.validUntil ?? '',
           date: data.date ?? '',
           status: data.status ?? 'Draft',
+          shipToName: data.shipToName ?? 'Vebix AUTOMATION',
+          shipToAddress: data.shipToAddress ?? '',
+          shipToContact: data.shipToContact ?? '',
+          shipToEmail: data.shipToEmail ?? '',
+          requisitioner: data.requisitioner ?? '',
+          shipVia: data.shipVia ?? '',
+          fob: data.fob ?? '',
+          shippingTerms: data.shippingTerms ?? '',
+          shippingAmount: Number(data.shippingAmount ?? 0),
+          otherAmount: Number(data.otherAmount ?? 0),
+          comments: data.comments ?? '',
           createdAt: data.createdAt ? (data.createdAt.toDate ? data.createdAt.toDate().toISOString() : String(data.createdAt)) : '',
           updatedAt: data.updatedAt ? (data.updatedAt.toDate ? data.updatedAt.toDate().toISOString() : String(data.updatedAt)) : '',
           updatedBy: data.updatedBy ?? 'System',
@@ -248,11 +276,24 @@ export async function convertQuotationToInvoice(quoteId: string, updatedBy: stri
     invoiceId: nextInvoiceId,
     clientName: quoteData.clientName ?? '',
     clientEmail: quoteData.clientEmail ?? '',
+    clientAddress: quoteData.clientAddress ?? '',
+    clientContact: quoteData.clientContact ?? '',
+    shipToName: quoteData.shipToName ?? 'Vebix AUTOMATION',
+    shipToAddress: quoteData.shipToAddress ?? '',
+    shipToContact: quoteData.shipToContact ?? '',
+    shipToEmail: quoteData.shipToEmail ?? '',
+    requisitioner: quoteData.requisitioner ?? '',
+    shipVia: quoteData.shipVia ?? '',
+    fob: quoteData.fob ?? '',
+    shippingTerms: quoteData.shippingTerms ?? '',
     items: quoteData.items ?? [],
     gstRate: Number(quoteData.gstRate ?? 18),
     subtotal: Number(quoteData.subtotal ?? 0),
     gstAmount: Number(quoteData.gstAmount ?? 0),
+    shippingAmount: Number(quoteData.shippingAmount ?? 0),
+    otherAmount: Number(quoteData.otherAmount ?? 0),
     total: Number(quoteData.total ?? 0),
+    comments: quoteData.comments ?? '',
     dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 14 Days Default
     date: new Date().toISOString().split('T')[0],
     status: 'Draft' as const,
@@ -346,6 +387,146 @@ export async function deleteExpense(id: string): Promise<void> {
 }
 
 // -------------------------------------------------------------
+// PURCHASE ORDERS FIRESTORE LAYER
+// -------------------------------------------------------------
+
+function purchaseOrdersCollection() {
+  return collection(getFirestoreDb(), 'purchase_orders');
+}
+
+function purchaseOrderDoc(id: string) {
+  return doc(getFirestoreDb(), 'purchase_orders', id);
+}
+
+function getIndianFiscalYear(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth(); // 0-11
+  let startYear = year;
+  let endYear = year + 1;
+
+  if (month < 3) { // Jan, Feb, Mar (fiscal year started last year)
+    startYear = year - 1;
+    endYear = year;
+  }
+
+  const startYearStr = String(startYear).slice(-2);
+  const endYearStr = String(endYear).slice(-2);
+  return `${startYearStr}-${endYearStr}`;
+}
+
+export async function generateNextPurchaseOrderId(): Promise<string> {
+  const fiscalYear = getIndianFiscalYear();
+  const q = query(
+    purchaseOrdersCollection(),
+    orderBy('poId', 'desc'),
+    limit(20) // Search recent to find current fiscal year sequences
+  );
+  const snap = await getDocs(q);
+  if (snap.empty) {
+    return `SE/PO/${fiscalYear}/01`;
+  }
+
+  // Find the highest sequence number for the CURRENT fiscal year
+  let maxSeqNum = 0;
+  for (const d of snap.docs) {
+    const poId = d.data().poId as string;
+    // Format should be SE/PO/YY-YY/NN
+    const parts = poId.split('/');
+    if (parts.length === 4 && parts[2] === fiscalYear) {
+      const seq = parseInt(parts[3], 10);
+      if (!isNaN(seq) && seq > maxSeqNum) {
+        maxSeqNum = seq;
+      }
+    }
+  }
+
+  const nextNum = maxSeqNum + 1;
+  return `SE/PO/${fiscalYear}/${String(nextNum).padStart(2, '0')}`;
+}
+
+export function subscribeToPurchaseOrders(
+  onData: (items: PurchaseOrder[]) => void,
+  onError: (error: Error) => void,
+) {
+  const q = query(purchaseOrdersCollection(), orderBy('createdAt', 'desc'));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const items = snapshot.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          poId: data.poId ?? '',
+          date: data.date ?? '',
+          supplierName: data.supplierName ?? '',
+          supplierAddress: data.supplierAddress ?? '',
+          supplierContact: data.supplierContact ?? '',
+          supplierEmail: data.supplierEmail ?? '',
+          supplierGst: data.supplierGst ?? '',
+
+          shipToName: data.shipToName ?? '',
+          shipToAddress: data.shipToAddress ?? '',
+          shipToContact: data.shipToContact ?? '',
+          shipToEmail: data.shipToEmail ?? '',
+
+          requisitioner: data.requisitioner ?? '',
+          shipVia: data.shipVia ?? '',
+          fob: data.fob ?? '',
+          shippingTerms: data.shippingTerms ?? '',
+
+          items: data.items ?? [],
+          subtotal: Number(data.subtotal ?? 0),
+          taxRate: Number(data.taxRate ?? 18),
+          taxAmount: Number(data.taxAmount ?? 0),
+          shippingAmount: Number(data.shippingAmount ?? 0),
+          otherAmount: Number(data.otherAmount ?? 0),
+          total: Number(data.total ?? 0),
+
+          comments: data.comments ?? '',
+          status: data.status ?? 'Draft',
+          createdAt: data.createdAt ? (data.createdAt.toDate ? data.createdAt.toDate().toISOString() : String(data.createdAt)) : '',
+          updatedAt: data.updatedAt ? (data.updatedAt.toDate ? data.updatedAt.toDate().toISOString() : String(data.updatedAt)) : '',
+          updatedBy: data.updatedBy ?? 'System',
+        } as PurchaseOrder;
+      });
+      onData(items);
+    },
+    (error) => onError(error),
+  );
+}
+
+export async function addPurchaseOrder(item: NewPurchaseOrder, updatedBy: string): Promise<string> {
+  const docRef = await addDoc(purchaseOrdersCollection(), {
+    ...item,
+    updatedBy,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  return docRef.id;
+}
+
+export async function updatePurchaseOrder(
+  id: string,
+  data: Partial<Omit<PurchaseOrder, 'id' | 'createdAt' | 'updatedAt' | 'updatedBy'>>,
+  updatedBy: string,
+): Promise<void> {
+  const updates: Record<string, any> = {
+    ...data,
+    updatedBy,
+    updatedAt: serverTimestamp(),
+  };
+  Object.keys(updates).forEach((key) => {
+    if (updates[key] === undefined) delete updates[key];
+  });
+  await updateDoc(purchaseOrderDoc(id), updates);
+}
+
+export async function deletePurchaseOrder(id: string): Promise<void> {
+  await deleteDoc(purchaseOrderDoc(id));
+}
+
+// -------------------------------------------------------------
 // CLEAR / MASS BATCH OPS (for testing or resets)
 // -------------------------------------------------------------
 
@@ -353,6 +534,7 @@ export async function clearAllFinanceDocuments(
   invoiceIds: string[],
   quoteIds: string[],
   expenseIds: string[],
+  poIds?: string[],
 ): Promise<void> {
   const db = getFirestoreDb();
   const batch = writeBatch(db);
@@ -368,6 +550,12 @@ export async function clearAllFinanceDocuments(
   expenseIds.forEach((id) => {
     batch.delete(doc(db, 'expenses', id));
   });
+
+  if (poIds) {
+    poIds.forEach((id) => {
+      batch.delete(doc(db, 'purchase_orders', id));
+    });
+  }
 
   await batch.commit();
 }

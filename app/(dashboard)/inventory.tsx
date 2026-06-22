@@ -103,8 +103,11 @@ export default function InventoryScreen() {
     );
   }
 
-  async function handleImportProducts(items: NewInventoryItem[]) {
-    return await importItems(items);
+  async function handleImportProducts(
+    itemsToCreate: NewInventoryItem[],
+    itemsToUpdate: { id: string; data: Partial<NewInventoryItem> }[]
+  ) {
+    return await importItems(itemsToCreate, itemsToUpdate);
   }
 
   return (

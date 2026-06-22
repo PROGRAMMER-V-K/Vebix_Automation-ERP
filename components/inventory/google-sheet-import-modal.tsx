@@ -24,7 +24,10 @@ type GoogleSheetImportModalProps = {
   visible: boolean;
   onClose: () => void;
   existingItems: InventoryItem[];
-  onImport: (items: NewInventoryItem[]) => Promise<{ ok: boolean; message?: string }>;
+  onImport: (
+    itemsToCreate: NewInventoryItem[],
+    itemsToUpdate: { id: string; data: Partial<NewInventoryItem> }[]
+  ) => Promise<{ ok: boolean; message?: string }>;
 };
 
 // Robust custom CSV parser (no external dependencies, safe on all platforms)
@@ -77,6 +80,67 @@ function normalizeDate(rawDate?: string): string {
   return clean || new Date().toISOString().split('T')[0];
 }
 
+// Find differences between existing record and incoming CSV sheet record.
+// ONLY records and returns updates for fields that are currently empty or '-' or '—' in the database (or 0 for numbers).
+function getUpdatedFields(
+  existing: InventoryItem,
+  parsed: { code: string; location: string; quantity: number; price: number; date: string }
+) {
+  const changes: { field: string; oldVal: string; newVal: string }[] = [];
+  const updates: Record<string, any> = {};
+  const isBlank = (val: any) => !val || val === '—' || val === '-';
+
+  // Code
+  const existCode = (existing.code || '').trim();
+  const parsedCode = (parsed.code || '').trim();
+  if (isBlank(existCode) && !isBlank(parsedCode)) {
+    changes.push({ field: 'Product Code', oldVal: existCode || '(Empty)', newVal: parsedCode });
+    updates.code = parsedCode;
+  }
+
+  // Location
+  const existLoc = (existing.location || '').trim();
+  const parsedLoc = (parsed.location || '').trim();
+  if (isBlank(existLoc) && !isBlank(parsedLoc)) {
+    changes.push({ field: 'Location', oldVal: existLoc || '(Empty)', newVal: parsedLoc });
+    updates.location = parsedLoc;
+  }
+
+  // Quantity
+  const existQty = Number(existing.quantity || 0);
+  const parsedQty = Number(parsed.quantity || 0);
+  if (existQty === 0 && parsedQty > 0) {
+    changes.push({
+      field: 'Quantity',
+      oldVal: String(existing.quantity),
+      newVal: String(parsed.quantity),
+    });
+    updates.quantity = parsedQty;
+  }
+
+  // Price
+  const existPrice = Number(existing.price || 0);
+  const parsedPrice = Number(parsed.price || 0);
+  if (existPrice === 0 && parsedPrice > 0) {
+    changes.push({
+      field: 'Price',
+      oldVal: `₹${existing.price}`,
+      newVal: `₹${parsed.price}`,
+    });
+    updates.price = parsedPrice;
+  }
+
+  // Date
+  const existDate = (existing.date || '').trim();
+  const parsedDate = (parsed.date || '').trim();
+  if (isBlank(existDate) && !isBlank(parsedDate)) {
+    changes.push({ field: 'Date', oldVal: existDate || '(Empty)', newVal: parsedDate });
+    updates.date = parsedDate;
+  }
+
+  return { changes, updates };
+}
+
 export function GoogleSheetImportModal({
   visible,
   onClose,
@@ -88,15 +152,32 @@ export function GoogleSheetImportModal({
   const [error, setError] = useState<string | null>(null);
   const [successResult, setSuccessResult] = useState<{
     imported: number;
+    updated: number;
     skipped: number;
     reasons: {
       missingName: number;
       duplicate: number;
     };
+    updatesList?: {
+      name: string;
+      invoiceNo: string;
+      project: string;
+      changes: { field: string; oldVal: string; newVal: string }[];
+    }[];
   } | null>(null);
 
   const [parsedItems, setParsedItems] = useState<{
-    items: (NewInventoryItem & { statusVal: string; isTextFormatted: boolean })[];
+    itemsToCreate: (NewInventoryItem & { statusVal: string; isTextFormatted: boolean })[];
+    itemsToUpdate: {
+      id: string;
+      name: string;
+      invoiceNo: string;
+      project: string;
+      data: Partial<NewInventoryItem>;
+      changes: { field: string; oldVal: string; newVal: string }[];
+      statusVal: string;
+      isTextFormatted: boolean;
+    }[];
     statusColName: string;
     uniqueStatuses: { status: string; count: number }[];
     hasTextFormatted: boolean;
@@ -178,8 +259,6 @@ export function GoogleSheetImportModal({
       );
 
       // Value-based Fallback Scanner:
-      // If dateIdx is not found via headers, check cell values of the first few rows 
-      // to identify which column contains date values (e.g. DD/MM/YY, YYYY-MM-DD etc.)
       if (dateIdx === -1) {
         const dateRegex = /^(\d{1,4})[\/\-](\d{1,2})[\/\-](\d{2,4})$/;
         const colDateVotes = new Array(headers.length).fill(0);
@@ -207,23 +286,8 @@ export function GoogleSheetImportModal({
         
         if (bestCol !== -1 && maxVotes >= 1) {
           dateIdx = bestCol;
-          console.log(`[GoogleSheetImport] Auto-detected date column by contents at column index: ${bestCol} (${headers[bestCol]})`);
         }
       }
-
-      console.log('CSV Import - Parsed Headers:', headers);
-      console.log('CSV Import - Mapped Indices:', {
-        nameIdx,
-        invoiceIdx,
-        projectIdx,
-        priceIdx,
-        locationIdx,
-        categoryIdx,
-        qtyIdx,
-        codeIdx,
-        dateIdx,
-        statusIdx,
-      });
 
       if (nameIdx === -1 || invoiceIdx === -1 || projectIdx === -1 || priceIdx === -1) {
         throw new Error(
@@ -231,15 +295,18 @@ export function GoogleSheetImportModal({
         );
       }
 
-      // Create a set of existing keys for speed: O(1) checks
-      const existingKeys = new Set(
-        existingItems.map(
-          (item) =>
-            `${item.invoiceNo.toLowerCase().trim()}_${item.name.toLowerCase().trim()}_${item.project.toLowerCase().trim()}`
-        )
-      );
+      const tempCreates: (NewInventoryItem & { statusVal: string; isTextFormatted: boolean })[] = [];
+      const tempUpdates: {
+        id: string;
+        name: string;
+        invoiceNo: string;
+        project: string;
+        data: Partial<NewInventoryItem>;
+        changes: { field: string; oldVal: string; newVal: string }[];
+        statusVal: string;
+        isTextFormatted: boolean;
+      }[] = [];
 
-      const tempItems: (NewInventoryItem & { statusVal: string; isTextFormatted: boolean })[] = [];
       const seenInSheet = new Set<string>();
       const statusCounts: Record<string, number> = {};
       let textFormattedCount = 0;
@@ -263,7 +330,7 @@ export function GoogleSheetImportModal({
         const project = row[projectIdx] ? row[projectIdx].trim() : '';
         const rawPrice = row[priceIdx] ? row[priceIdx].trim() : '';
         
-        // Detect text-formatted cell by raw string from CSV (invalid grouping in US locale)
+        // Detect text-formatted cell by raw string from CSV
         const isTextFormatted = indianGroupingRegex.test(rawPrice);
         const cleanPrice = rawPrice.replace(/[$,\s]/g, '');
         const price = parseFloat(cleanPrice);
@@ -281,48 +348,121 @@ export function GoogleSheetImportModal({
 
         const key = `${finalInvoiceNo.toLowerCase().trim()}_${name.toLowerCase().trim()}_${finalProject.toLowerCase().trim()}`;
 
-        // De-duplication check: Skip if already in Firestore or duplicated in the uploaded CSV
-        if (existingKeys.has(key) || seenInSheet.has(key)) {
+        // De-duplication inside the sheet itself: Skip duplicate rows in same sheet
+        if (seenInSheet.has(key)) {
           skippedCount++;
           duplicateCount++;
           continue;
         }
-
         seenInSheet.add(key);
 
-        // Read optional values safely
-        const location = locationIdx !== -1 && row[locationIdx]
-          ? row[locationIdx].trim()
-          : (categoryIdx !== -1 && row[categoryIdx] ? row[categoryIdx].trim() : 'IN');
-        const rawQty = qtyIdx !== -1 && row[qtyIdx] ? parseInt(row[qtyIdx].replace(/\D/g, ''), 10) : 1;
-        const quantity = isNaN(rawQty) || rawQty <= 0 ? 1 : rawQty;
-        const code = codeIdx !== -1 && row[codeIdx] ? row[codeIdx].trim() : `INV-${Math.floor(10000 + Math.random() * 90000)}`;
+        // Find existing match in DB
+        const match = existingItems.find(
+          (item) =>
+            item.invoiceNo.toLowerCase().trim() === finalInvoiceNo.toLowerCase().trim() &&
+            item.name.toLowerCase().trim() === name.toLowerCase().trim() &&
+            item.project.toLowerCase().trim() === finalProject.toLowerCase().trim()
+        );
+
+        // Read optional values safely, utilizing existing match fallbacks to prevent empty sheet values overwriting DB
+        let code = '';
+        if (codeIdx !== -1 && row[codeIdx] && row[codeIdx].trim()) {
+          code = row[codeIdx].trim();
+        } else if (match) {
+          code = match.code;
+        } else {
+          code = `INV-${Math.floor(10000 + Math.random() * 90000)}`;
+        }
+
+        let location = '';
+        const rawLoc = locationIdx !== -1 && row[locationIdx] ? row[locationIdx].trim() : '';
+        const rawCat = categoryIdx !== -1 && row[categoryIdx] ? row[categoryIdx].trim() : '';
+        const sheetLoc = rawLoc || rawCat;
+        if (sheetLoc) {
+          location = sheetLoc;
+        } else if (match) {
+          location = match.location;
+        } else {
+          location = 'IN';
+        }
+
+        let quantity = 1;
+        const hasQtyValue = qtyIdx !== -1 && row[qtyIdx] && row[qtyIdx].trim() !== '';
+        if (hasQtyValue) {
+          const rawQty = parseInt(row[qtyIdx].replace(/\D/g, ''), 10);
+          quantity = isNaN(rawQty) || rawQty <= 0 ? 1 : rawQty;
+        } else if (match) {
+          quantity = match.quantity;
+        }
+
+        let itemPrice = finalPrice;
+        const hasPriceValue = priceIdx !== -1 && row[priceIdx] && row[priceIdx].trim() !== '';
+        if (!hasPriceValue && match) {
+          itemPrice = match.price;
+        }
+
+        let date = '';
         const dateVal = dateIdx !== -1 && row[dateIdx] ? row[dateIdx].trim() : '';
-        const date = normalizeDate(dateVal);
+        if (dateVal) {
+          date = normalizeDate(dateVal);
+        } else if (match) {
+          date = match.date;
+        } else {
+          date = normalizeDate('');
+        }
 
         const rawStatus = statusIdx !== -1 && row[statusIdx] ? row[statusIdx].trim() : '';
         const statusVal = rawStatus || '(Empty)';
 
-        tempItems.push({
-          name,
-          invoiceNo: finalInvoiceNo,
-          project: finalProject,
-          price: finalPrice,
-          location,
-          quantity,
-          code,
-          date,
-          statusVal,
-          isTextFormatted,
-        });
+        if (match) {
+          // Compare attributes and see if anything is updated
+          const { changes, updates } = getUpdatedFields(match, { code, location, quantity, price: itemPrice, date });
+          if (changes.length > 0) {
+            tempUpdates.push({
+              id: match.id,
+              name,
+              invoiceNo: finalInvoiceNo,
+              project: finalProject,
+              data: updates,
+              changes,
+              statusVal,
+              isTextFormatted,
+            });
 
-        if (statusIdx !== -1) {
-          statusCounts[statusVal] = (statusCounts[statusVal] || 0) + 1;
-        }
+            if (statusIdx !== -1) {
+              statusCounts[statusVal] = (statusCounts[statusVal] || 0) + 1;
+            }
+            if (isTextFormatted) {
+              textFormattedCount++;
+              textFormattedSum += finalPrice;
+            }
+          } else {
+            // All attributes match exactly, treat as duplicate and skip
+            skippedCount++;
+            duplicateCount++;
+          }
+        } else {
+          // Does not exist - prepare new product insert
+          tempCreates.push({
+            name,
+            invoiceNo: finalInvoiceNo,
+            project: finalProject,
+            price: itemPrice,
+            location,
+            quantity,
+            code,
+            date,
+            statusVal,
+            isTextFormatted,
+          });
 
-        if (isTextFormatted) {
-          textFormattedCount++;
-          textFormattedSum += finalPrice;
+          if (statusIdx !== -1) {
+            statusCounts[statusVal] = (statusCounts[statusVal] || 0) + 1;
+          }
+          if (isTextFormatted) {
+            textFormattedCount++;
+            textFormattedSum += finalPrice;
+          }
         }
       }
 
@@ -349,7 +489,8 @@ export function GoogleSheetImportModal({
         }
 
         setParsedItems({
-          items: tempItems,
+          itemsToCreate: tempCreates,
+          itemsToUpdate: tempUpdates,
           statusColName: statusIdx !== -1 ? parsedRows[0][statusIdx].trim() : '',
           uniqueStatuses,
           hasTextFormatted,
@@ -363,10 +504,10 @@ export function GoogleSheetImportModal({
       }
 
       // Fallback: Proceed with normal import immediately
-      const itemsToImport = tempItems.map(({ statusVal, isTextFormatted, ...rest }) => rest);
-      if (itemsToImport.length === 0) {
+      if (tempCreates.length === 0 && tempUpdates.length === 0) {
         setSuccessResult({
           imported: 0,
+          updated: 0,
           skipped: skippedCount,
           reasons: { missingName: missingNameCount, duplicate: duplicateCount },
         });
@@ -374,13 +515,22 @@ export function GoogleSheetImportModal({
         return;
       }
 
-      // 4. Batch write to database
-      const result = await onImport(itemsToImport);
+      const cleanCreates = tempCreates.map(({ statusVal, isTextFormatted, ...rest }) => rest);
+      const cleanUpdates = tempUpdates.map((u) => ({ id: u.id, data: u.data }));
+
+      const result = await onImport(cleanCreates, cleanUpdates);
       if (result.ok) {
         setSuccessResult({
-          imported: itemsToImport.length,
+          imported: cleanCreates.length,
+          updated: cleanUpdates.length,
           skipped: skippedCount,
           reasons: { missingName: missingNameCount, duplicate: duplicateCount },
+          updatesList: tempUpdates.map((u) => ({
+            name: u.name,
+            invoiceNo: u.invoiceNo,
+            project: u.project,
+            changes: u.changes,
+          })),
         });
         setSheetUrl('');
       } else {
@@ -406,33 +556,49 @@ export function GoogleSheetImportModal({
     setImporting(true);
     setError(null);
     try {
-      const filtered = parsedItems.items.filter((item) => {
-        // Exclude if text-formatted and exclude checkbox is checked
+      const filteredCreates = parsedItems.itemsToCreate.filter((item) => {
         if (parsedItems.hasTextFormatted && excludeTextFormatted && item.isTextFormatted) {
           return false;
         }
-        // Filter by status if status column exists
         if (parsedItems.statusColName && !selectedStatuses[item.statusVal]) {
           return false;
         }
         return true;
       });
 
-      const itemsToImport = filtered.map(({ statusVal, isTextFormatted, ...rest }) => rest);
-      const skippedCount = parsedItems.items.length - filtered.length;
+      const filteredUpdates = parsedItems.itemsToUpdate.filter((item) => {
+        if (parsedItems.hasTextFormatted && excludeTextFormatted && item.isTextFormatted) {
+          return false;
+        }
+        if (parsedItems.statusColName && !selectedStatuses[item.statusVal]) {
+          return false;
+        }
+        return true;
+      });
 
-      if (itemsToImport.length === 0) {
+      const cleanCreates = filteredCreates.map(({ statusVal, isTextFormatted, ...rest }) => rest);
+      const cleanUpdates = filteredUpdates.map((u) => ({ id: u.id, data: u.data }));
+      const skippedCount = (parsedItems.itemsToCreate.length + parsedItems.itemsToUpdate.length) - (filteredCreates.length + filteredUpdates.length);
+
+      if (cleanCreates.length === 0 && cleanUpdates.length === 0) {
         setError('No items selected for import. Please ensure at least one item remains selected.');
         setImporting(false);
         return;
       }
 
-      const result = await onImport(itemsToImport);
+      const result = await onImport(cleanCreates, cleanUpdates);
       if (result.ok) {
         setSuccessResult({
-          imported: itemsToImport.length,
+          imported: cleanCreates.length,
+          updated: cleanUpdates.length,
           skipped: skippedCount,
           reasons: { missingName: 0, duplicate: 0 },
+          updatesList: filteredUpdates.map((u) => ({
+            name: u.name,
+            invoiceNo: u.invoiceNo,
+            project: u.project,
+            changes: u.changes,
+          })),
         });
         setParsedItems(null);
         setSheetUrl('');
@@ -502,7 +668,10 @@ export function GoogleSheetImportModal({
                     
                     {/* Collapsible list of text-formatted items */}
                     <ScrollView style={styles.textItemsList} nestedScrollEnabled>
-                      {parsedItems.items.filter(item => item.isTextFormatted).map((item, idx) => (
+                      {[
+                        ...parsedItems.itemsToCreate.filter(item => item.isTextFormatted).map(item => ({ name: item.name, price: item.price })),
+                        ...parsedItems.itemsToUpdate.filter(item => item.isTextFormatted).map(item => ({ name: item.name, price: item.data.price ?? 0 }))
+                      ].map((item, idx) => (
                         <Text key={idx} style={styles.textItemRow}>
                           • {item.name} (₹{item.price.toLocaleString()})
                         </Text>
@@ -549,15 +718,28 @@ export function GoogleSheetImportModal({
                   <Text style={styles.previewSummaryText}>
                     Selected to import:{' '}
                     <Text style={{ fontWeight: '700' }}>
-                      {parsedItems.items.filter((item) => {
+                      {parsedItems.itemsToCreate.filter((item) => {
                         if (parsedItems.hasTextFormatted && excludeTextFormatted && item.isTextFormatted) return false;
                         if (parsedItems.statusColName && !selectedStatuses[item.statusVal]) return false;
                         return true;
                       }).length}
                     </Text>{' '}
-                    items. Will skip:{' '}
+                    new items, and{' '}
                     <Text style={{ fontWeight: '700' }}>
-                      {parsedItems.items.filter((item) => {
+                      {parsedItems.itemsToUpdate.filter((item) => {
+                        if (parsedItems.hasTextFormatted && excludeTextFormatted && item.isTextFormatted) return false;
+                        if (parsedItems.statusColName && !selectedStatuses[item.statusVal]) return false;
+                        return true;
+                      }).length}
+                    </Text>{' '}
+                    updates. Will skip:{' '}
+                    <Text style={{ fontWeight: '700' }}>
+                      {parsedItems.itemsToCreate.filter((item) => {
+                        if (parsedItems.hasTextFormatted && excludeTextFormatted && item.isTextFormatted) return true;
+                        if (parsedItems.statusColName && !selectedStatuses[item.statusVal]) return true;
+                        return false;
+                      }).length +
+                       parsedItems.itemsToUpdate.filter((item) => {
                         if (parsedItems.hasTextFormatted && excludeTextFormatted && item.isTextFormatted) return true;
                         if (parsedItems.statusColName && !selectedStatuses[item.statusVal]) return true;
                         return false;
@@ -566,6 +748,39 @@ export function GoogleSheetImportModal({
                     items.
                   </Text>
                 </View>
+
+                {/* Updates Preview List */}
+                {parsedItems.itemsToUpdate.filter((item) => {
+                  if (parsedItems.hasTextFormatted && excludeTextFormatted && item.isTextFormatted) return false;
+                  if (parsedItems.statusColName && !selectedStatuses[item.statusVal]) return false;
+                  return true;
+                }).length > 0 && (
+                  <View style={styles.updatesPreviewBox}>
+                    <Text style={styles.updatesPreviewTitle}>Updates Preview ({
+                      parsedItems.itemsToUpdate.filter((item) => {
+                        if (parsedItems.hasTextFormatted && excludeTextFormatted && item.isTextFormatted) return false;
+                        if (parsedItems.statusColName && !selectedStatuses[item.statusVal]) return false;
+                        return true;
+                      }).length
+                    })</Text>
+                    <ScrollView style={styles.updatesPreviewScroll} nestedScrollEnabled>
+                      {parsedItems.itemsToUpdate.filter((item) => {
+                        if (parsedItems.hasTextFormatted && excludeTextFormatted && item.isTextFormatted) return false;
+                        if (parsedItems.statusColName && !selectedStatuses[item.statusVal]) return false;
+                        return true;
+                      }).map((item, idx) => (
+                        <View key={idx} style={styles.updateItemPreviewRow}>
+                          <Text style={styles.updateItemHeader}>• {item.name} (Inv: {item.invoiceNo})</Text>
+                          {item.changes.map((ch, cidx) => (
+                            <Text key={cidx} style={styles.updateChangeRow}>
+                              &nbsp;&nbsp;- {ch.field}: {ch.oldVal} → {ch.newVal}
+                            </Text>
+                          ))}
+                        </View>
+                      ))}
+                    </ScrollView>
+                  </View>
+                )}
 
                 {/* Back button */}
                 <Pressable
@@ -618,8 +833,29 @@ export function GoogleSheetImportModal({
                 <View style={{ flex: 1 }}>
                   <Text style={styles.successTitle}>Import completed successfully!</Text>
                   <Text style={styles.successSub}>
-                    Successfully added <Text style={{ fontWeight: '700' }}>{successResult.imported}</Text> new items to inventory.
+                    Added <Text style={{ fontWeight: '700' }}>{successResult.imported}</Text> new items and updated <Text style={{ fontWeight: '700' }}>{successResult.updated}</Text> existing items.
                   </Text>
+                  
+                  {successResult.updatesList && successResult.updatesList.length > 0 ? (
+                    <View style={styles.successUpdatesList}>
+                      <Text style={styles.successUpdatesTitle}>Detailed updates performed:</Text>
+                      <ScrollView style={styles.successUpdatesScroll} nestedScrollEnabled>
+                        {successResult.updatesList.map((item, idx) => (
+                          <View key={idx} style={styles.successUpdateRow}>
+                            <Text style={styles.successUpdateItemHeader}>
+                              • {item.name} (Inv: {item.invoiceNo}, Proj: {item.project})
+                            </Text>
+                            {item.changes.map((ch, cidx) => (
+                              <Text key={cidx} style={styles.successChangeText}>
+                                &nbsp;&nbsp;- {ch.field}: {ch.oldVal} → {ch.newVal}
+                              </Text>
+                            ))}
+                          </View>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  ) : null}
+
                   {successResult.skipped > 0 ? (
                     <View style={styles.skippedBreakdown}>
                       <Text style={styles.skippedBreakdownTitle}>Skipped rows summary:</Text>
@@ -1021,5 +1257,75 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#7F1D1D',
     lineHeight: 16,
+  },
+  updatesPreviewBox: {
+    borderWidth: 1,
+    borderColor: HorizonColors.border,
+    borderRadius: 10,
+    backgroundColor: '#F8FAFC',
+    padding: 12,
+    gap: 8,
+    marginTop: 4,
+  },
+  updatesPreviewTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: HorizonColors.text,
+  },
+  updatesPreviewScroll: {
+    maxHeight: 150,
+    backgroundColor: HorizonColors.white,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: HorizonColors.border,
+    padding: 8,
+  },
+  updateItemPreviewRow: {
+    marginBottom: 10,
+  },
+  updateItemHeader: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: HorizonColors.text,
+  },
+  updateChangeRow: {
+    fontSize: 12,
+    color: HorizonColors.primary,
+    marginTop: 2,
+  },
+  successUpdatesList: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 8,
+    backgroundColor: '#F0FDF4',
+    padding: 12,
+    gap: 8,
+  },
+  successUpdatesTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#166534',
+  },
+  successUpdatesScroll: {
+    maxHeight: 150,
+    backgroundColor: HorizonColors.white,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#DCFCE7',
+    padding: 8,
+  },
+  successUpdateRow: {
+    marginBottom: 8,
+  },
+  successUpdateItemHeader: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: HorizonColors.text,
+  },
+  successChangeText: {
+    fontSize: 12,
+    color: '#166534',
+    marginTop: 2,
   },
 });

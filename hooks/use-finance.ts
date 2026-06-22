@@ -6,6 +6,7 @@ import {
   subscribeToInvoices,
   subscribeToQuotations,
   subscribeToExpenses,
+  subscribeToPurchaseOrders,
   addInvoice,
   updateInvoice,
   deleteInvoice,
@@ -16,15 +17,20 @@ import {
   addExpense,
   updateExpense,
   deleteExpense,
+  addPurchaseOrder,
+  updatePurchaseOrder,
+  deletePurchaseOrder,
   clearAllFinanceDocuments,
 } from '@/lib/finance-firestore';
 import {
   Invoice,
   Quotation,
   Expense,
+  PurchaseOrder,
   NewInvoice,
   NewQuotation,
   NewExpense,
+  NewPurchaseOrder,
 } from '@/types/finance';
 
 export function useFinance() {
@@ -32,6 +38,7 @@ export function useFinance() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,13 +52,15 @@ export function useFinance() {
     let unsubInvoices: (() => void) | undefined;
     let unsubQuotes: (() => void) | undefined;
     let unsubExpenses: (() => void) | undefined;
+    let unsubPurchaseOrders: (() => void) | undefined;
 
     let loadingInvoices = true;
     let loadingQuotes = true;
     let loadingExpenses = true;
+    let loadingPurchaseOrders = true;
 
     const checkLoading = () => {
-      if (!loadingInvoices && !loadingQuotes && !loadingExpenses) {
+      if (!loadingInvoices && !loadingQuotes && !loadingExpenses && !loadingPurchaseOrders) {
         setLoading(false);
       }
     };
@@ -95,6 +104,19 @@ export function useFinance() {
           checkLoading();
         }
       );
+
+      unsubPurchaseOrders = subscribeToPurchaseOrders(
+        (data) => {
+          setPurchaseOrders(data);
+          loadingPurchaseOrders = false;
+          checkLoading();
+        },
+        (err) => {
+          setError(err.message);
+          loadingPurchaseOrders = false;
+          checkLoading();
+        }
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to sync finance data.');
       setLoading(false);
@@ -104,6 +126,7 @@ export function useFinance() {
       unsubInvoices?.();
       unsubQuotes?.();
       unsubExpenses?.();
+      unsubPurchaseOrders?.();
     };
   }, []);
 
@@ -239,12 +262,53 @@ export function useFinance() {
     }
   }, []);
 
+  // Purchase Order CRUD Callbacks
+  const createPurchaseOrder = useCallback(async (item: NewPurchaseOrder) => {
+    try {
+      const id = await addPurchaseOrder(item, userName);
+      return { ok: true as const, id };
+    } catch (err) {
+      return {
+        ok: false as const,
+        message: err instanceof Error ? err.message : 'Failed to create purchase order.',
+      };
+    }
+  }, [userName]);
+
+  const editPurchaseOrder = useCallback(
+    async (id: string, data: Partial<Omit<PurchaseOrder, 'id' | 'createdAt' | 'updatedAt' | 'updatedBy'>>) => {
+      try {
+        await updatePurchaseOrder(id, data, userName);
+        return { ok: true as const };
+      } catch (err) {
+        return {
+          ok: false as const,
+          message: err instanceof Error ? err.message : 'Failed to update purchase order.',
+        };
+      }
+    },
+    [userName]
+  );
+
+  const removePurchaseOrder = useCallback(async (id: string) => {
+    try {
+      await deletePurchaseOrder(id);
+      return { ok: true as const };
+    } catch (err) {
+      return {
+        ok: false as const,
+        message: err instanceof Error ? err.message : 'Failed to delete purchase order.',
+      };
+    }
+  }, []);
+
   const clearAll = useCallback(async () => {
     try {
       const iIds = invoices.map(i => i.id);
       const qIds = quotations.map(q => q.id);
       const eIds = expenses.map(e => e.id);
-      await clearAllFinanceDocuments(iIds, qIds, eIds);
+      const poIds = purchaseOrders.map(po => po.id);
+      await clearAllFinanceDocuments(iIds, qIds, eIds, poIds);
       return { ok: true as const };
     } catch (err) {
       return {
@@ -252,12 +316,13 @@ export function useFinance() {
         message: err instanceof Error ? err.message : 'Failed to clear database.',
       };
     }
-  }, [invoices, quotations, expenses]);
+  }, [invoices, quotations, expenses, purchaseOrders]);
 
   return {
     invoices,
     quotations,
     expenses,
+    purchaseOrders,
     loading,
     error,
     createInvoice,
@@ -270,6 +335,9 @@ export function useFinance() {
     createExpense,
     editExpense,
     removeExpense,
+    createPurchaseOrder,
+    editPurchaseOrder,
+    removePurchaseOrder,
     clearAll,
     isConfigured: isFirebaseConfigured(),
   };

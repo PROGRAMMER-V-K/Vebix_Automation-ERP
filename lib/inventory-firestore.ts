@@ -160,33 +160,59 @@ export async function clearAllInventoryItems(ids: string[]): Promise<void> {
 }
 
 export async function importInventoryItems(
-  items: NewInventoryItem[],
+  itemsToCreate: NewInventoryItem[],
+  itemsToUpdate: { id: string; data: Partial<NewInventoryItem> }[],
   updatedBy: string,
 ): Promise<void> {
   const db = getFirestoreDb();
-  const chunks = [];
   
-  for (let i = 0; i < items.length; i += 450) {
-    chunks.push(items.slice(i, i + 450));
+  // Combine all operations for chunking
+  const ops: Array<
+    | { type: 'create'; item: NewInventoryItem }
+    | { type: 'update'; id: string; data: Partial<NewInventoryItem> }
+  > = [
+    ...itemsToCreate.map((item) => ({ type: 'create' as const, item })),
+    ...itemsToUpdate.map((u) => ({ type: 'update' as const, id: u.id, data: u.data })),
+  ];
+
+  const chunks = [];
+  for (let i = 0; i < ops.length; i += 450) {
+    chunks.push(ops.slice(i, i + 450));
   }
 
   for (const chunk of chunks) {
     const batch = writeBatch(db);
-    for (const item of chunk) {
-      const docRef = doc(collection(db, 'inventory'));
-      batch.set(docRef, {
-        name: item.name,
-        invoiceNo: item.invoiceNo,
-        project: item.project,
-        price: Number(item.price),
-        code: item.code || `INV-${Math.floor(10000 + Math.random() * 90000)}`,
-        location: item.location || 'IN',
-        quantity: Number(item.quantity ?? 1),
-        date: item.date || new Date().toISOString().split('T')[0],
-        updatedBy,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+    for (const op of chunk) {
+      if (op.type === 'create') {
+        const docRef = doc(collection(db, 'inventory'));
+        batch.set(docRef, {
+          name: op.item.name,
+          invoiceNo: op.item.invoiceNo,
+          project: op.item.project,
+          price: Number(op.item.price),
+          code: op.item.code || `INV-${Math.floor(10000 + Math.random() * 90000)}`,
+          location: op.item.location || 'IN',
+          quantity: Number(op.item.quantity ?? 1),
+          date: op.item.date || new Date().toISOString().split('T')[0],
+          updatedBy,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        const docRef = doc(db, 'inventory', op.id);
+        const updates: Record<string, any> = {
+          ...op.data,
+          updatedBy,
+          updatedAt: serverTimestamp(),
+        };
+        // Clean undefined properties
+        Object.keys(updates).forEach((key) => {
+          if (updates[key] === undefined) {
+            delete updates[key];
+          }
+        });
+        batch.update(docRef, updates);
+      }
     }
     await batch.commit();
   }

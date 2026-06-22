@@ -3,8 +3,12 @@
   "compilerOptions": {
     "strict": true,
     "jsx": "react-native",
+    "skipLibCheck": true,
     "moduleSuffixes": [".ios", ".android", ".native", ".web", ""],
     "paths": {
+      "expo-file-system/legacy": [
+        "./types/expo-file-system-legacy.d.ts"
+      ],
       "@/*": [
         "./*"
       ]
@@ -15,5 +19,8 @@
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules"
   ]
 }

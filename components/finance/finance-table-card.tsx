@@ -13,14 +13,15 @@ import {
 } from 'react-native';
 
 import { HorizonColors } from '@/constants/horizon';
-import { Invoice, Quotation, Expense, InvoiceStatus, QuotationStatus } from '@/types/finance';
+import { Invoice, Quotation, Expense, InvoiceStatus, QuotationStatus, PurchaseOrder, PurchaseOrderStatus } from '@/types/finance';
 
 type FinanceTableCardProps = {
-  type: 'invoice' | 'quotation' | 'expense';
-  data: any[]; // Invoice[] | Quotation[] | Expense[]
+  type: 'invoice' | 'quotation' | 'expense' | 'purchase_order';
+  data: any[]; // Invoice[] | Quotation[] | Expense[] | PurchaseOrder[]
   onEdit: (item: any) => void;
   onDelete: (id: string) => void;
   onConvertQuote?: (quoteId: string) => void;
+  onPrintPo?: (item: any) => void;
 };
 
 export function FinanceTableCard({
@@ -29,6 +30,7 @@ export function FinanceTableCard({
   onEdit,
   onDelete,
   onConvertQuote,
+  onPrintPo,
 }: FinanceTableCardProps) {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 768;
@@ -57,6 +59,13 @@ export function FinanceTableCard({
             exp.project.toLowerCase().includes(q) ||
             exp.category.toLowerCase().includes(q);
           if (!matches) return false;
+        } else if (type === 'purchase_order') {
+          const po = item as PurchaseOrder;
+          const matches =
+            po.poId.toLowerCase().includes(q) ||
+            po.supplierName.toLowerCase().includes(q) ||
+            (po.supplierEmail && po.supplierEmail.toLowerCase().includes(q));
+          if (!matches) return false;
         } else {
           const invoiceOrQuote = item as Invoice | Quotation;
           const idStr = type === 'invoice' ? (item as Invoice).invoiceId : (item as Quotation).quoteId;
@@ -68,7 +77,7 @@ export function FinanceTableCard({
         }
       }
 
-      // 2. Status filter (Invoices and Quotes)
+      // 2. Status filter
       if (type !== 'expense' && statusFilter !== 'All') {
         if (item.status !== statusFilter) return false;
       }
@@ -83,7 +92,7 @@ export function FinanceTableCard({
   }, [data, searchQuery, statusFilter, categoryFilter, type]);
 
   const handleDeleteConfirm = (item: any) => {
-    const title = type === 'invoice' ? item.invoiceId : type === 'quotation' ? item.quoteId : item.title;
+    const title = type === 'invoice' ? item.invoiceId : type === 'quotation' ? item.quoteId : type === 'purchase_order' ? item.poId : item.title;
     Alert.alert(
       'Delete Document',
       `Are you sure you want to delete "${title}"? This action cannot be undone.`,
@@ -102,10 +111,11 @@ export function FinanceTableCard({
   };
 
   // Status color mapper
-  const getStatusStyle = (status: InvoiceStatus | QuotationStatus) => {
+  const getStatusStyle = (status: InvoiceStatus | QuotationStatus | PurchaseOrderStatus) => {
     switch (status) {
       case 'Paid':
       case 'Converted':
+      case 'Approved':
         return { bg: '#DCFCE7', text: '#16A34A' };
       case 'Sent':
         return { bg: '#FEF3C7', text: '#D97706' };
@@ -155,6 +165,11 @@ export function FinanceTableCard({
                   </View>
                 </View>
                 <View style={[styles.actionsColumn, { flex: 1.2 }]}>
+                  {onPrintPo && (
+                    <Pressable style={styles.actionIconBtn} onPress={() => onPrintPo(item)} hitSlop={6}>
+                      <MaterialIcons name="print" size={18} color={HorizonColors.primary} />
+                    </Pressable>
+                  )}
                   <Pressable style={styles.actionIconBtn} onPress={() => onEdit(item)} hitSlop={6}>
                     <MaterialIcons name="edit" size={18} color={HorizonColors.textMuted} />
                   </Pressable>
@@ -209,6 +224,63 @@ export function FinanceTableCard({
                       hitSlop={6}>
                       <MaterialIcons name="transform" size={14} color={HorizonColors.primary} />
                       <Text style={styles.convertBtnText}>Invoice</Text>
+                    </Pressable>
+                  )}
+                  {onPrintPo && (
+                    <Pressable style={styles.actionIconBtn} onPress={() => onPrintPo(item)} hitSlop={6}>
+                      <MaterialIcons name="print" size={18} color={HorizonColors.primary} />
+                    </Pressable>
+                  )}
+                  <Pressable style={styles.actionIconBtn} onPress={() => onEdit(item)} hitSlop={6}>
+                    <MaterialIcons name="edit" size={18} color={HorizonColors.textMuted} />
+                  </Pressable>
+                  <Pressable style={styles.actionIconBtn} onPress={() => handleDeleteConfirm(item)} hitSlop={6}>
+                    <MaterialIcons name="delete-outline" size={18} color="#EF4444" />
+                  </Pressable>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      );
+    }
+
+    if (type === 'purchase_order') {
+      return (
+        <View style={styles.table}>
+          <View style={styles.tableHeader}>
+            <Text style={[styles.columnHeader, { flex: 1.5 }]}>PO ID</Text>
+            <Text style={[styles.columnHeader, { flex: 2.2 }]}>SUPPLIER</Text>
+            <Text style={[styles.columnHeader, { flex: 1.2 }]}>DATE</Text>
+            <Text style={[styles.columnHeader, { flex: 2 }]}>SHIPPING TERMS</Text>
+            <Text style={[styles.columnHeader, { flex: 1.5, textAlign: 'right' }]}>TOTAL</Text>
+            <Text style={[styles.columnHeader, { flex: 1.2, textAlign: 'center' }]}>STATUS</Text>
+            <Text style={[styles.columnHeader, { flex: 1.5, textAlign: 'center' }]}>ACTIONS</Text>
+          </View>
+          {filteredData.map((item: any, index) => {
+            const isEven = index % 2 === 0;
+            const statusStyle = getStatusStyle(item.status);
+            return (
+              <View key={item.id} style={[styles.tableRow, isEven ? styles.rowEven : styles.rowOdd]}>
+                <Text style={[styles.colValue, { flex: 1.5, fontWeight: '700' }]}>{item.poId}</Text>
+                <View style={{ flex: 2.2 }}>
+                  <Text style={styles.clientNameText} numberOfLines={1}>{item.supplierName}</Text>
+                  <Text style={styles.clientEmailText} numberOfLines={1}>{item.supplierEmail || '—'}</Text>
+                </View>
+                <Text style={[styles.colValue, { flex: 1.2 }]}>{item.date}</Text>
+                <Text style={[styles.colValue, { flex: 2 }]} numberOfLines={2}>{item.shippingTerms || '—'}</Text>
+                <Text style={[styles.colValue, { flex: 1.5, textAlign: 'right', fontWeight: '700', color: HorizonColors.primary }]}>
+                  ₹{item.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </Text>
+                <View style={{ flex: 1.2, alignItems: 'center' }}>
+                  <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
+                    <Text style={[styles.statusBadgeText, { color: statusStyle.text }]}>{item.status}</Text>
+                  </View>
+                </View>
+                <View style={[styles.actionsColumn, { flex: 1.5 }]}>
+                  {onPrintPo && (
+                    <Pressable style={styles.actionIconBtn} onPress={() => onPrintPo(item)} hitSlop={6}>
+                      <MaterialIcons name="print" size={18} color={HorizonColors.primary} />
                     </Pressable>
                   )}
                   <Pressable style={styles.actionIconBtn} onPress={() => onEdit(item)} hitSlop={6}>
@@ -308,6 +380,11 @@ export function FinanceTableCard({
                     ₹{inv.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </Text>
                   <View style={styles.mobileCardActions}>
+                    {onPrintPo && (
+                      <Pressable style={styles.mobileActionBtn} onPress={() => onPrintPo(inv)} hitSlop={8}>
+                        <MaterialIcons name="print" size={16} color={HorizonColors.primary} />
+                      </Pressable>
+                    )}
                     <Pressable style={styles.mobileActionBtn} onPress={() => onEdit(inv)} hitSlop={8}>
                       <MaterialIcons name="edit" size={16} color={HorizonColors.primary} />
                     </Pressable>
@@ -350,10 +427,56 @@ export function FinanceTableCard({
                         <Text style={styles.mobileConvertText}>Invoice</Text>
                       </Pressable>
                     )}
+                    {onPrintPo && (
+                      <Pressable style={styles.mobileActionBtn} onPress={() => onPrintPo(qtn)} hitSlop={8}>
+                        <MaterialIcons name="print" size={16} color={HorizonColors.primary} />
+                      </Pressable>
+                    )}
                     <Pressable style={styles.mobileActionBtn} onPress={() => onEdit(qtn)} hitSlop={8}>
                       <MaterialIcons name="edit" size={16} color={HorizonColors.primary} />
                     </Pressable>
                     <Pressable style={[styles.mobileActionBtn, styles.mobileDeleteBtn]} onPress={() => handleDeleteConfirm(qtn)} hitSlop={8}>
+                      <MaterialIcons name="delete-outline" size={16} color="#EF4444" />
+                    </Pressable>
+                  </View>
+                </View>
+              </View>
+            );
+          }
+
+          if (type === 'purchase_order') {
+            const po = item as any;
+            const statusStyle = getStatusStyle(po.status);
+            return (
+              <View key={po.id} style={styles.mobileCard}>
+                <View style={styles.mobileCardHeader}>
+                  <Text style={styles.mobileCardId}>{po.poId}</Text>
+                  <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
+                    <Text style={[styles.statusBadgeText, { color: statusStyle.text }]}>{po.status}</Text>
+                  </View>
+                </View>
+
+                <Text style={styles.mobileCardClient} numberOfLines={1}>Supplier: {po.supplierName}</Text>
+                
+                <View style={styles.mobileCardDates}>
+                  <Text style={styles.mobileCardDateText}>Date: {po.date}</Text>
+                  <Text style={styles.mobileCardDateText} numberOfLines={1}>Terms: {po.shippingTerms ? (po.shippingTerms.length > 20 ? po.shippingTerms.substring(0, 20) + '...' : po.shippingTerms) : '—'}</Text>
+                </View>
+
+                <View style={styles.mobileCardFooter}>
+                  <Text style={styles.mobileCardTotal}>
+                    ₹{po.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </Text>
+                  <View style={styles.mobileCardActions}>
+                    {onPrintPo && (
+                      <Pressable style={styles.mobileActionBtn} onPress={() => onPrintPo(po)} hitSlop={8}>
+                        <MaterialIcons name="print" size={16} color={HorizonColors.primary} />
+                      </Pressable>
+                    )}
+                    <Pressable style={styles.mobileActionBtn} onPress={() => onEdit(po)} hitSlop={8}>
+                      <MaterialIcons name="edit" size={16} color={HorizonColors.primary} />
+                    </Pressable>
+                    <Pressable style={[styles.mobileActionBtn, styles.mobileDeleteBtn]} onPress={() => handleDeleteConfirm(po)} hitSlop={8}>
                       <MaterialIcons name="delete-outline" size={16} color="#EF4444" />
                     </Pressable>
                   </View>
@@ -413,7 +536,13 @@ export function FinanceTableCard({
           <MaterialIcons name="search" size={20} color={HorizonColors.iconMuted} />
           <TextInput
             style={styles.searchInput}
-            placeholder={type === 'expense' ? 'Search by title/project/category...' : 'Search by ID/client details...'}
+            placeholder={
+              type === 'expense'
+                ? 'Search by title/project/category...'
+                : type === 'purchase_order'
+                ? 'Search by PO ID/supplier details...'
+                : 'Search by ID/client details...'
+            }
             placeholderTextColor={HorizonColors.textMuted}
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -433,7 +562,17 @@ export function FinanceTableCard({
         <View style={styles.filterPillsRow}>
           <Text style={styles.filterLabel}>Filter Status:</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterPillsScroll}>
-            {['All', 'Draft', 'Sent', type === 'invoice' ? 'Paid' : 'Converted', type === 'invoice' ? 'Overdue' : 'Expired', 'Cancelled'].map((st) => (
+            {(type === 'purchase_order'
+              ? ['All', 'Draft', 'Sent', 'Approved', 'Cancelled']
+              : [
+                  'All',
+                  'Draft',
+                  'Sent',
+                  type === 'invoice' ? 'Paid' : 'Converted',
+                  type === 'invoice' ? 'Overdue' : 'Expired',
+                  'Cancelled',
+                ]
+            ).map((st) => (
               <Pressable
                 key={st}
                 onPress={() => setStatusFilter(st)}

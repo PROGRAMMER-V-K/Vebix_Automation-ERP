@@ -9,9 +9,12 @@
  * - Harmonious HSL colors, premium typography, and subtle micro-animations/states.
  */
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import { useState, useMemo, useEffect } from 'react';
 import {
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -215,6 +218,66 @@ export function InventoryTableCard({
     };
   }, [filteredItems, onFilteredItemsChange]);
 
+  // Export active sorted/filtered data to CSV/Excel
+  const handleExportExcel = async () => {
+    if (tableFilteredItems.length === 0) {
+      Alert.alert('No Data', 'There is no filtered data to export.');
+      return;
+    }
+
+    try {
+      const headers = ['Product Name', 'Product Code', 'Invoice No', 'Project Used In', 'Location', 'Quantity', 'Price (INR)', 'Date'];
+      const csvRows = [headers.join(',')];
+
+      for (const item of tableFilteredItems) {
+        // Escape commas and quotes to produce valid CSV
+        const row = [
+          `"${item.name.replace(/"/g, '""')}"`,
+          `"${item.code.replace(/"/g, '""')}"`,
+          `"${item.invoiceNo.replace(/"/g, '""')}"`,
+          `"${item.project.replace(/"/g, '""')}"`,
+          `"${item.location.replace(/"/g, '""')}"`,
+          item.quantity,
+          item.price,
+          `"${displayDate(item.date)}"`
+        ];
+        csvRows.push(row.join(','));
+      }
+
+      const csvContent = csvRows.join('\n');
+      const dateStr = new Date().toISOString().split('T')[0];
+
+      if (Platform.OS === 'web') {
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', `inventory_export_${dateStr}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } else {
+        const filepath = `${FileSystem.documentDirectory}inventory_export_${dateStr}.csv`;
+        await FileSystem.writeAsStringAsync(filepath, csvContent, {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
+
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(filepath, {
+            mimeType: 'text/csv',
+            dialogTitle: 'Export Inventory Data',
+            UTI: 'public.comma-separated-values-text',
+          });
+        } else {
+          Alert.alert('Sharing Unavailable', 'Native sharing is not available on this device.');
+        }
+      }
+    } catch (err) {
+      Alert.alert('Export Failed', err instanceof Error ? err.message : 'Unknown error occurred.');
+    }
+  };
+
   function handleDeletePress(item: InventoryItem) {
     Alert.alert(
       'Delete Product',
@@ -417,6 +480,16 @@ export function InventoryTableCard({
               <Text style={styles.resetFilterText}>Clear Filters</Text>
             </Pressable>
           )}
+          <Pressable
+            onPress={handleExportExcel}
+            style={({ pressed }) => [styles.exportBtn, pressed && styles.btnPressed]}
+            hitSlop={8}>
+            <MaterialIcons
+              name="file-download"
+              size={20}
+              color={HorizonColors.primary}
+            />
+          </Pressable>
           <Pressable
             onPress={() => setShowFilters(!showFilters)}
             style={[styles.filterToggleBtn, showFilters && styles.filterToggleActive]}>
@@ -657,6 +730,20 @@ const styles = StyleSheet.create({
   filterToggleActive: {
     borderColor: HorizonColors.primary,
     backgroundColor: HorizonColors.primaryLight,
+  },
+  exportBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: HorizonColors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FAFBFD',
+  },
+  btnPressed: {
+    opacity: 0.75,
+    backgroundColor: '#F1F5F9',
   },
   filtersContainer: {
     paddingHorizontal: 16,

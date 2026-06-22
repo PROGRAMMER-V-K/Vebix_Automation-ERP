@@ -3,6 +3,7 @@ import { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,16 +12,19 @@ import {
   View,
 } from 'react-native';
 
+import * as Print from 'expo-print';
+
 import { ExpenseModal } from '@/components/finance/expense-modal';
 import { FinanceAnalytics } from '@/components/finance/finance-analytics';
 import { FinanceTableCard } from '@/components/finance/finance-table-card';
-import { InvoiceModal } from '@/components/finance/invoice-modal';
-import { QuotationModal } from '@/components/finance/quotation-modal';
+import { InvoiceWorkspace, generateInvoiceHtml } from '@/components/finance/invoice-workspace';
+import { PurchaseOrderWorkspace, generatePOHtml } from '@/components/finance/po-workspace';
+import { QuotationWorkspace, generateQuoteHtml } from '@/components/finance/quote-workspace';
 import { HorizonColors } from '@/constants/horizon';
 import { useFinance } from '@/hooks/use-finance';
-import { Invoice, Quotation, Expense } from '@/types/finance';
+import { Invoice, Quotation, Expense, PurchaseOrder } from '@/types/finance';
 
-type TabType = 'Overview' | 'Invoices' | 'Quotations' | 'Expenses';
+type TabType = 'Overview' | 'Invoices' | 'Quotations' | 'Expenses' | 'Purchase Orders';
 
 export default function FinanceScreen() {
   const { width } = useWindowDimensions();
@@ -30,6 +34,7 @@ export default function FinanceScreen() {
     invoices,
     quotations,
     expenses,
+    purchaseOrders,
     loading,
     error,
     createInvoice,
@@ -42,6 +47,9 @@ export default function FinanceScreen() {
     createExpense,
     editExpense,
     removeExpense,
+    createPurchaseOrder,
+    editPurchaseOrder,
+    removePurchaseOrder,
     isConfigured,
   } = useFinance();
 
@@ -49,14 +57,18 @@ export default function FinanceScreen() {
   const [activeTab, setActiveTab] = useState<TabType>('Overview');
 
   // Modal visibility states
-  const [invoiceModalVisible, setInvoiceModalVisible] = useState(false);
+  const [invoiceWorkspaceActive, setInvoiceWorkspaceActive] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
 
-  const [quoteModalVisible, setQuoteModalVisible] = useState(false);
+  const [quoteWorkspaceActive, setQuoteWorkspaceActive] = useState(false);
   const [editingQuotation, setEditingQuotation] = useState<Quotation | null>(null);
 
   const [expenseModalVisible, setExpenseModalVisible] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+
+  // Purchase Order workspace states
+  const [poWorkspaceActive, setPoWorkspaceActive] = useState(false);
+  const [editingPurchaseOrder, setEditingPurchaseOrder] = useState<PurchaseOrder | null>(null);
 
   // Save Handlers
   const handleSaveInvoice = async (itemData: any) => {
@@ -116,6 +128,25 @@ export default function FinanceScreen() {
     }
   };
 
+  const handleSavePurchaseOrder = async (itemData: any) => {
+    if (editingPurchaseOrder) {
+      const res = await editPurchaseOrder(editingPurchaseOrder.id, itemData);
+      if (res.ok) {
+        Alert.alert('Success', 'Purchase Order updated successfully.');
+        setEditingPurchaseOrder(null);
+        return { ok: true };
+      }
+      return { ok: false, message: res.message };
+    } else {
+      const res = await createPurchaseOrder(itemData);
+      if (res.ok) {
+        Alert.alert('Success', 'Purchase Order created successfully.');
+        return { ok: true };
+      }
+      return { ok: false, message: res.message };
+    }
+  };
+
   // Delete Handlers
   const handleDeleteInvoice = async (id: string) => {
     const res = await removeInvoice(id);
@@ -138,6 +169,13 @@ export default function FinanceScreen() {
     }
   };
 
+  const handleDeletePurchaseOrder = async (id: string) => {
+    const res = await removePurchaseOrder(id);
+    if (!res.ok) {
+      Alert.alert('Error', res.message || 'Failed to delete Purchase Order.');
+    }
+  };
+
   // Convert Quotation Trigger
   const handleConvertQuote = async (quoteId: string) => {
     const res = await convertQuote(quoteId);
@@ -155,12 +193,58 @@ export default function FinanceScreen() {
   // Trigger Add dialogs
   const handleOpenAddInvoice = () => {
     setEditingInvoice(null);
-    setInvoiceModalVisible(true);
+    setInvoiceWorkspaceActive(true);
+  };
+
+  const handlePrintInvoice = async (invoice: Invoice) => {
+    try {
+      const htmlContent = generateInvoiceHtml(invoice);
+      if (Platform.OS === 'web') {
+        const printWindow = window.open('', '_blank');
+        if (printWindow) {
+          printWindow.document.write(htmlContent);
+          printWindow.document.close();
+          printWindow.focus();
+          setTimeout(() => {
+            printWindow.print();
+          }, 500);
+        } else {
+          Alert.alert('Pop-up Blocked', 'Please allow pop-ups for this site to print PDF.');
+        }
+      } else {
+        await Print.printAsync({ html: htmlContent });
+      }
+    } catch (err) {
+      Alert.alert('Printing Failed', err instanceof Error ? err.message : 'Unknown error');
+    }
   };
 
   const handleOpenAddQuotation = () => {
     setEditingQuotation(null);
-    setQuoteModalVisible(true);
+    setQuoteWorkspaceActive(true);
+  };
+
+  const handlePrintQuote = async (quote: Quotation) => {
+    try {
+      const htmlContent = generateQuoteHtml(quote);
+      if (Platform.OS === 'web') {
+        const printWindow = window.open('', '_blank');
+        if (printWindow) {
+          printWindow.document.write(htmlContent);
+          printWindow.document.close();
+          printWindow.focus();
+          setTimeout(() => {
+            printWindow.print();
+          }, 500);
+        } else {
+          Alert.alert('Pop-up Blocked', 'Please allow pop-ups for this site to print PDF.');
+        }
+      } else {
+        await Print.printAsync({ html: htmlContent });
+      }
+    } catch (err) {
+      Alert.alert('Printing Failed', err instanceof Error ? err.message : 'Unknown error');
+    }
   };
 
   const handleOpenAddExpense = () => {
@@ -168,17 +252,48 @@ export default function FinanceScreen() {
     setExpenseModalVisible(true);
   };
 
+  const handleOpenAddPo = () => {
+    setEditingPurchaseOrder(null);
+    setPoWorkspaceActive(true);
+  };
+
+  const handlePrintPo = async (po: PurchaseOrder) => {
+    try {
+      const htmlContent = generatePOHtml(po);
+      if (Platform.OS === 'web') {
+        const printWindow = window.open('', '_blank');
+        if (printWindow) {
+          printWindow.document.write(htmlContent);
+          printWindow.document.close();
+          printWindow.focus();
+          setTimeout(() => {
+            printWindow.print();
+          }, 500);
+        } else {
+          Alert.alert('Pop-up Blocked', 'Please allow pop-ups for this site to print PDF.');
+        }
+      } else {
+        await Print.printAsync({ html: htmlContent });
+      }
+    } catch (err) {
+      Alert.alert('Printing Failed', err instanceof Error ? err.message : 'Unknown error');
+    }
+  };
+
   // Trigger Edit dialogs
   const handleEditPress = (item: any) => {
     if (activeTab === 'Invoices') {
       setEditingInvoice(item);
-      setInvoiceModalVisible(true);
+      setInvoiceWorkspaceActive(true);
     } else if (activeTab === 'Quotations') {
       setEditingQuotation(item);
-      setQuoteModalVisible(true);
+      setQuoteWorkspaceActive(true);
     } else if (activeTab === 'Expenses') {
       setEditingExpense(item);
       setExpenseModalVisible(true);
+    } else if (activeTab === 'Purchase Orders') {
+      setEditingPurchaseOrder(item);
+      setPoWorkspaceActive(true);
     }
   };
 
@@ -202,6 +317,45 @@ export default function FinanceScreen() {
           </Text>
         </View>
       </View>
+    );
+  }
+
+  if (poWorkspaceActive) {
+    return (
+      <PurchaseOrderWorkspace
+        editingItem={editingPurchaseOrder}
+        onClose={() => {
+          setPoWorkspaceActive(false);
+          setEditingPurchaseOrder(null);
+        }}
+        onSave={handleSavePurchaseOrder}
+      />
+    );
+  }
+
+  if (quoteWorkspaceActive) {
+    return (
+      <QuotationWorkspace
+        editingItem={editingQuotation}
+        onClose={() => {
+          setQuoteWorkspaceActive(false);
+          setEditingQuotation(null);
+        }}
+        onSave={handleSaveQuotation}
+      />
+    );
+  }
+
+  if (invoiceWorkspaceActive) {
+    return (
+      <InvoiceWorkspace
+        editingItem={editingInvoice}
+        onClose={() => {
+          setInvoiceWorkspaceActive(false);
+          setEditingInvoice(null);
+        }}
+        onSave={handleSaveInvoice}
+      />
     );
   }
 
@@ -252,12 +406,22 @@ export default function FinanceScreen() {
             </View>
             <Text style={styles.quickActionText}>Create Quote</Text>
           </Pressable>
+
+          {/* Quick Create PO */}
+          <Pressable
+            style={({ pressed }) => [styles.quickActionBtn, pressed && styles.btnPressed]}
+            onPress={handleOpenAddPo}>
+            <View style={[styles.quickIconCircle, { backgroundColor: '#F3E8FF' }]}>
+              <MaterialIcons name="shopping-cart" size={16} color="#8B5CF6" />
+            </View>
+            <Text style={styles.quickActionText}>Create PO</Text>
+          </Pressable>
         </ScrollView>
       </View>
 
       {/* Main Tab Switcher */}
       <View style={styles.tabContainer}>
-        {(['Overview', 'Invoices', 'Quotations', 'Expenses'] as TabType[]).map((tab) => {
+        {(['Overview', 'Invoices', 'Quotations', 'Expenses', 'Purchase Orders'] as TabType[]).map((tab) => {
           const isTabActive = activeTab === tab;
           return (
             <Pressable
@@ -289,6 +453,7 @@ export default function FinanceScreen() {
             data={invoices}
             onEdit={handleEditPress}
             onDelete={handleDeleteInvoice}
+            onPrintPo={handlePrintInvoice}
           />
         </View>
       )}
@@ -308,6 +473,7 @@ export default function FinanceScreen() {
             onEdit={handleEditPress}
             onDelete={handleDeleteQuotation}
             onConvertQuote={handleConvertQuote}
+            onPrintPo={handlePrintQuote}
           />
         </View>
       )}
@@ -330,26 +496,28 @@ export default function FinanceScreen() {
         </View>
       )}
 
-      {/* Modals Popup Controllers */}
-      <InvoiceModal
-        visible={invoiceModalVisible}
-        onClose={() => {
-          setInvoiceModalVisible(false);
-          setEditingInvoice(null);
-        }}
-        onSave={handleSaveInvoice}
-        editingItem={editingInvoice}
-      />
+      {activeTab === 'Purchase Orders' && (
+        <View>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>Purchase Orders Listing</Text>
+            <Pressable style={styles.sectionAddBtn} onPress={handleOpenAddPo}>
+              <MaterialIcons name="add" size={16} color={HorizonColors.white} />
+              <Text style={styles.sectionAddBtnText}>Add Purchase Order</Text>
+            </Pressable>
+          </View>
+          <FinanceTableCard
+            type="purchase_order"
+            data={purchaseOrders}
+            onEdit={handleEditPress}
+            onDelete={handleDeletePurchaseOrder}
+            onPrintPo={handlePrintPo}
+          />
+        </View>
+      )}
 
-      <QuotationModal
-        visible={quoteModalVisible}
-        onClose={() => {
-          setQuoteModalVisible(false);
-          setEditingQuotation(null);
-        }}
-        onSave={handleSaveQuotation}
-        editingItem={editingQuotation}
-      />
+      {/* Modals Popup Controllers */}
+
+
 
       <ExpenseModal
         visible={expenseModalVisible}

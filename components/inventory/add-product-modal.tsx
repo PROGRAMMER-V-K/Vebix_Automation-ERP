@@ -20,6 +20,35 @@ import { InventoryItem, NewInventoryItem } from '@/types/inventory';
 
 const LOCATIONS = ['IN', 'OUT'];
 
+// Helper to get today's date formatted as DD/MM/YYYY
+function getTodayUserFormatted(): string {
+  const today = new Date();
+  const dd = String(today.getDate()).padStart(2, '0');
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const yyyy = today.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+// Converts YYYY-MM-DD to DD/MM/YYYY
+function toUserDateFormat(isoDate: string): string {
+  if (!isoDate) return '';
+  const parts = isoDate.split('-');
+  if (parts.length === 3) {
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  }
+  return isoDate;
+}
+
+// Converts DD/MM/YYYY to YYYY-MM-DD
+function toDatabaseDateFormat(userDate: string): string {
+  if (!userDate) return '';
+  const parts = userDate.split('/');
+  if (parts.length === 3) {
+    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  }
+  return userDate;
+}
+
 type AddProductModalProps = {
   visible: boolean;
   onClose: () => void;
@@ -35,6 +64,7 @@ export function AddProductModal({
 }: AddProductModalProps) {
   const [name, setName] = useState('');
   const [invoiceNo, setInvoiceNo] = useState('');
+  const [date, setDate] = useState('');
   const [project, setProject] = useState('');
   const [price, setPrice] = useState('');
   const [quantity, setQuantity] = useState('1');
@@ -47,6 +77,7 @@ export function AddProductModal({
     if (editingItem) {
       setName(editingItem.name);
       setInvoiceNo(editingItem.invoiceNo);
+      setDate(toUserDateFormat(editingItem.date));
       setProject(editingItem.project);
       setPrice(String(editingItem.price));
       setQuantity(String(editingItem.quantity));
@@ -54,6 +85,7 @@ export function AddProductModal({
     } else {
       setName('');
       setInvoiceNo('');
+      setDate(getTodayUserFormatted());
       setProject('');
       setPrice('');
       setQuantity('1');
@@ -67,6 +99,12 @@ export function AddProductModal({
     if (!name.trim()) nextErrors.name = 'Product name is required';
     if (!invoiceNo.trim()) nextErrors.invoiceNo = 'Invoice number is required';
     if (!project.trim()) nextErrors.project = 'Project is required';
+
+    if (!date.trim()) {
+      nextErrors.date = 'Date is required';
+    } else if (!/^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[0-2])\/\d{4}$/.test(date.trim())) {
+      nextErrors.date = 'Date format must be DD/MM/YYYY';
+    }
 
     const parsedPrice = parseFloat(price);
     if (!price.trim()) {
@@ -98,7 +136,7 @@ export function AddProductModal({
       quantity: parseInt(quantity, 10),
       location,
       code: editingItem?.code || `INV-${Math.floor(10000 + Math.random() * 90000)}`,
-      date: editingItem?.date || new Date().toISOString().split('T')[0],
+      date: toDatabaseDateFormat(date.trim()),
     };
 
     const res = await onSave(itemData);
@@ -157,20 +195,37 @@ export function AddProductModal({
               {errors.name ? <Text style={styles.errorText}>{errors.name}</Text> : null}
             </View>
 
-            {/* Invoice No */}
-            <View style={styles.field}>
-              <Text style={styles.label}>Invoice Number *</Text>
-              <TextInput
-                style={[styles.input, errors.invoiceNo && styles.inputError]}
-                placeholder="Enter invoice number"
-                placeholderTextColor={HorizonColors.textMuted}
-                value={invoiceNo}
-                onChangeText={(val) => {
-                  setInvoiceNo(val);
-                  if (errors.invoiceNo) setErrors((prev) => ({ ...prev, invoiceNo: '' }));
-                }}
-              />
-              {errors.invoiceNo ? <Text style={styles.errorText}>{errors.invoiceNo}</Text> : null}
+            {/* Invoice No & Date Row */}
+            <View style={styles.row}>
+              <View style={[styles.field, { flex: 1 }]}>
+                <Text style={styles.label}>Invoice Number *</Text>
+                <TextInput
+                  style={[styles.input, errors.invoiceNo && styles.inputError]}
+                  placeholder="Enter invoice number"
+                  placeholderTextColor={HorizonColors.textMuted}
+                  value={invoiceNo}
+                  onChangeText={(val) => {
+                    setInvoiceNo(val);
+                    if (errors.invoiceNo) setErrors((prev) => ({ ...prev, invoiceNo: '' }));
+                  }}
+                />
+                {errors.invoiceNo ? <Text style={styles.errorText}>{errors.invoiceNo}</Text> : null}
+              </View>
+
+              <View style={[styles.field, { flex: 1 }]}>
+                <Text style={styles.label}>Date (DD/MM/YYYY) *</Text>
+                <TextInput
+                  style={[styles.input, errors.date && styles.inputError]}
+                  placeholder="DD/MM/YYYY"
+                  placeholderTextColor={HorizonColors.textMuted}
+                  value={date}
+                  onChangeText={(val) => {
+                    setDate(val);
+                    if (errors.date) setErrors((prev) => ({ ...prev, date: '' }));
+                  }}
+                />
+                {errors.date ? <Text style={styles.errorText}>{errors.date}</Text> : null}
+              </View>
             </View>
 
             {/* Project */}
